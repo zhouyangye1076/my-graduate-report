@@ -465,9 +465,9 @@ decode 块尝试利用 encode 产生的微架构状态差异产生执行时间�
 它的执行结果比较容易受到第一次执行时产生的微架构状态的影响，
 因此生成框架简单使用和 encode 块相似的代码作为 decode 块。\par
 
-\textbf{秘密数据获得块（get\_secret 块）：}
-get\_secret 块直接用立即数指令生成 secret 数据的值，并将值存储到和 access\_secret 一致的目的寄存器中。
-执行 get\_secret 块可以得到和 access\_secret 块一样的执行结果，但是并不会修改 cache、内存等存储单元。
+\textbf{替换块（replace 块）：}
+replace 块用于替换 encode 块和 delay 块之间的部分，它直接用立即数指令生成 secret 数据的值，并将值存储到和 access\_secret 一致的目的寄存器中。
+执行 replace 块可以得到和 access\_secret 块一样的执行结果，但是并不会修改 cache、内存等存储单元。
 
 在进行代码排布时，encode 块需要在瞬态窗口中执行，因此被放置在 trans 块内部，且在 access\_secret 块执行完毕后执行；
 decode 块为了可以和 encode 块使用尽可能一样的处理器部件，因此它除了指令和 encode 块高度相似外，
@@ -478,8 +478,8 @@ decode group 在 victim group 之后执行，用于对 encode 块编码在处理
 如图\ref{paper:group-switch-all}所示，完整程序在执行时首先执行 train group 序列进行 trigger 指令的训练，
 然后切换到 victim group 触发瞬态窗口、访问秘密数据和将秘密数据编码到微架构状态，最后切换到 decode group，
 尝试从微架构状态中解码 secret 的值。为了确保 decode group 执行 decode 块时可以获得和 encode 块执行时一样的操作数，从而使用一样的处理器部件，
-decode group 复制 victim group 的 load\_init 块、delay 块；trigger 块和 secret\_migration 块用 nop 块替代；
-access\_secret 块用 get\_secret 块代替，避免修改cache、内存的状态；decode 块替代 encode 块。
+decode group 复制 victim group 的 load\_init 块、delay 块；secret\_migration 块用 nop 块替代；
+trigger 块、access\_secret 块和两者之间可能存在的 return 块用 replace 块代替，避免修改cache、内存的状态；decode 块替代 encode 块。
 因此 decode group 最后的代码块排布如图\ref{paper:group-switch-all}中的 decode group 所示。\par
 
 \begin{figure}[!h]
@@ -631,7 +631,8 @@ inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ �
 内部的操作由 dpi-c 接口调用 asic/sim/probebuffer.cpp 中的 parafuzz\_probebuff\_tick 实现，
 该函数会根据写入寄存器的值执行退出和打印操作。
 为了将 probebuffer 集成到 BOOM 处理器中，我们为 BOOM 的chisel 工程提供了 BlackBox 的 verilog 接口，
-并为 probebuffer 分配了 0x800 的 CSR 号。当 csrw 指令写 0x800 特权寄存器时即可调用 probebuffer 的打印和退出程序接口。
+并为 probebuffer 分配了 0x800 的 CSR 号。当 csrw 指令写 0x800 特权寄存器时即可调用 probebuffer 的打印和退出程序接口
+（此外，probebuffer 也被用于物理内存切换，这部分内容将在下一节中介绍）。
 接口的具体调用细节如下表。\par
 
 \begin{table}[h!]
@@ -648,7 +649,8 @@ inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ �
             0xAF1B608E883A0002 & probebuff切换到打印字符状态 \\
             0xAF1B608E883A0003 & probebuff切换到打印地址状态 \\
             0xAF1B608E883B0000 & probebuff执行 exit 函数结束仿真进程 \\
-            其他                  & 根据当前工作模式调用 printf 函数输出写入数据 \\
+            0xAF1B608E883C0000 & 内存单元进行物理内存切换     \\
+            其他               & 根据当前工作模式调用 printf 函数输出写入数据 \\
             \hline
         \end{tabular}
     }
@@ -746,7 +748,7 @@ Swappable Memory 提供的核心数据结构和函数接口如图\ref{code:swapp
     \label{code:swappable-memory}
 \end{figure}
 
-1.内存初始化：在处理器测试程序一开始执行的时候，SwappableMem 根据 memory config 文件中对 memory region 的定义，进行内存初始化。
+1.内存初始化：在处理器测试程序一开始自动执行的时候，SwappableMem 根据 memory config 文件中对 memory region 的定义，进行内存初始化。
 SwappableMem 的 initial\_mem 函数根据 start\_addr 和 max\_mem\_size 字段产生一个 max\_mem\_size/4K 大小的指针数组 mem\_block\_array，
 每个表项用于指向对应的页数据。每一个 dut mem\_region 表项通过 register\_normal\_blocks 生成一个大小为 max\_len、载入对应文件二进制数据的连续内存，
 然后 mem\_block\_array 对应的页表项指向 normal mem\_region 的页起始地址，用这样的方法将内存单元的一个 dut 内存区域载入对应的指令和数据。
@@ -789,4 +791,181 @@ swap\_schedule 的序号，然后将 current\_swap 递增，得到下一个需�
     \caption{SwappableMem 内存切换}
     \label{paper:swap-mem-swap}
 \end{figure}
+
+为了测试程序的软件可以主动调用内存切换共能，来进行 train group、victim group、decode group 之间的切换，因此
+SwappableMem 需要为软件暴露编程接口。我们将这个接口集成到 probebuffer 当中，如果 probebuffer 寄存器写入 0xAF1B608E883B0000
+即可执行一次内存切换。
+
+\textbf{生成框架协同：}
+参照图\ref{paper:group-switch-all}，测试程序的执行流程是先执行初始部分代码，然后用内存切换机制依次执行 train group 序列、
+victim group 序列、decode group 序列，然后执行 exit 块的代码退出。为了简化 group 之间的跳转流程，生成框架将 exit 块建模为
+ exit group，作为所有共用地址的 swap mem\_region 的最后一个，这样当测试程序依次切换 swap\_schedule 的 swap mem\_region 时就可以
+在最后一个 swap mem\_region 执行 exit 块的代码结束测试。这也确保了测试程序在 swap\_schedule 的 swap mem\_region 耗尽之前可以结束程序。\par
+
+测试程序包括框架代码和各个 group 各自的代码，当测试程序进行二进制生成的时候，首先生成一个 elf 程序，然后转换为对应的二进制。
+但是因为各个 group 共用同一个物理地址，这导致单次生成的 elf 无法直接包含所有 group 的二进制内容。因此生成框架每次只用一个 group 的
+汇编代码和框架代码组合生成一个二进制文件，然后根据程序的符号表，将二进制文件切割为框架代码的二进制部分（dut mem\_region）和 group 代码的
+二进制部分（swap mem\_region）。最后所有的 dut mem\_region 和swap mem\_region 按照 config 指定格式生成 config 文件即可。\par
+
+最后为了方便测试程序在执行的时候进行内存切换，生成框架将内存切换的代码（将 0xAF1B608E883B0000 写入 0x800 寄存器）放置在 trap 块，然后
+将 return 块、trans 块、encode 块、nop\_return 块等退出 group 的出口指令由原来的跳转指令修改为 ebreak 指令。
+这样无论是因为触发异常退出 group，还是从控制流出口正常退出都会最终在 trap 块内部执行内存切换的代码，完成内存切换。
+trap 块末尾将返回地址修改为 group 的入口地址退出异常处理程序，即可开始执行下一个 group 的代码。
+内存切换和执行流程如图\ref{paper:execute-flow}所示。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/execute-flow.png}
+    \caption{程序执行和内存切换流程}
+    \label{paper:execute-flow}
+\end{figure}
+
+\subsection{框架组件生成}
+
+为了生成可以执行的程序，生成框架不但要生成 trigger 块、train 块等用于出发瞬态窗口和侧信道泄露秘密数据的 poc 代码，
+还需要额外生成一些框架代码，用于支持 poc 代码的执行和生效。本章节将对这些框架相关的代码部分、数据部分、其他机制进行罗列和详细介绍。\par
+
+\subsubsection{框架代码块和框架数据块}
+本章节将对框架相关的代码部分、数据部分进行罗列和详细介绍。
+
+\textbf{全局初始化块（init 块）：}
+init 块用于对所有 GPR、FPR、CSR、PC 和特权级进行初始化。为了对寄存器，特别是特权寄存器继续 field 粒度的属性设置，
+本工作实现了 snapshot 模块作为子模块。该模块会读入一个 reg\_init.hjson，这个文件记录了通用寄存器 GPR、浮点寄存器 FPR、
+M态和S态的基本特权寄存器 field 粒度的属性值，然后拼接 CSR 的各个 field 得到 CSR 的初始值，并生成寄存器初始化的汇编代码。
+该汇编代码将所有 CSR、FPR、GPR 的初始化值存储为一个 64 位数据的数组，然后依次读取数据的值来初始化 CSR、FPR、GPR 的值。
+生成框架的 InitManager 负责修改 reg\_init.hjson 各个字段的值，为每个特权寄存器提供满足测试程序要求的值，
+并调用 snapshot 模块得到对应的初始化程序。例如 mtvec 和 stvec 需要设置为 trap 块的入口地址，satp 设置为页表的地址，
+mstatus 的 pmie 设置为程序执行所需要的特权级，mepc 设置为后续程序执行的入口地址，然后在 init 块末尾执行 mret，
+进入后续测试程序的入口，并自动设置程序执行时的特权级。\par
+
+\textbf{BIM 初始化块（init\_bim 块）：}
+init\_bim 块用于等待处理器的 BIM 分支预测部件进行初始化。BOOM 等处理器使用 BIM 前端部件进行分支预测，BIM 是一个拥有众多表项
+的庞大 sram（例如 BOOM 的 BIM 是 2048 项的），处理器在启动的时候会将 BIM 的表项依次进行初始化为初始状态。
+为了使瞬态执行漏洞测试程序在攻击时，处理器的 BIM 组件已经进入工作状态，从而使测试程序的执行环境和真实环境一致，
+生成框架在这里插入了一段延时的循环，用于等待 BIM 部件各个表项初始化完毕。当 init 块完成寄存器初始化之后，首先进入
+init\_bim 块等待 BIM 的初始化，当 init\_bim 块执行完毕后执行 ebreak 指令进入 trap 块开始执行内存切换。\par
+
+\textbf{异常块（trap块）：}
+trap 块用于 group 的退出和物理内存的切换。当一个 group 执行完毕后就会进入 trap 块，然后 trap 块指令将操作数 0xAF1B608E883C0000
+写入 probebuffer 寄存器进行内存切换，之后执行 fence 指令刷新 pipeline、icache 和 tlb 的指令缓存，完整指令内存在处理器内部的同步。
+之后将返回地址设置为 group 的入口地址（所有 group 入口地址保持统一）后返回下一个 group 入口进行执行。为了可以监控 group 开始执行和
+执行结束两个事件的发生，生成框架在 trap 的入口插入一条 INFO\_VCTM\_END 表示 group 执行结束，在 ret 前插入一条 INFO\_VCTM\_START 表示 group 开始执行。
+因为 trap 块在 M 模式下和 S 模式下需要不同的页表权限；而且 trap 在做内存访问的时候，M 模式下直接使用 label 对应的物理地址，
+但是 S 模式下需要将 label 加上常数偏移量，得到 S 模式专用的 FFF 开头的地址才可以开始内存访问。
+因此这里实际上会生成 mtrap 块和 strap 块两个代码块，
+init 块会将 mtvec 设置为 mtrap 的入口，stvec 设置为 strap 的入口。\par
+
+\textbf{退出块（exit 块）：}
+exit 块作为最后一个 swap mem\_region、exit group 唯一的块，被用于测试程序的退出。
+该模块将 0xAF1B608E883CB0000 写入 probebuffer 寄存器，结束程序。\par
+
+\textbf{秘密数据块（secret 块）：}
+secret 块用于存放秘密数据，是瞬态漏洞执行程序泄漏的目标。secret 被初始化为一些魔数，并且生成框架确保测试程序只会在
+ access\_secret 块和 secret\_migrate 块中访问 secret 数据，确保程序不在其他位置显式或者瞬态访问 secret 数据。
+当执行差分测试时，变体测试程序会将 secret 部分替换为全 0，然后进行后续的差分测试。\par
+
+\textbf{信道数据块（channel 块）：}
+channel 块是预留给 cache 微架构状态编码的内存区域。channel 由 256 个 64 字节组成，每 64 字节是一个 cacheline 的长度，
+可以使用 access\_secret 得到的一字节 secret 作为索引访问 channel，从而实现将 secret 编码到 cache 进行数据泄露的目的。\par
+
+\textbf{随机数据块（random\_data 块）：}
+random\_data 块是两页随机数据。train 块、encode 块、trigger 块等代码块有时会执行随机内存访问，则生成框架可以让这些内存
+读写指令访问 random\_data 块的数据，这样既不会破坏其他重要数据区域，又可以为数据流引入新的随机数，增加执行流的复杂程度和覆盖率。\par
+
+\textbf{无用数据块（dummy\_data 块）：}
+dummy\_data 块内部的数据值没有意义，该块由四页内存空间组成，secret\_migrate 块通过访问 dummy\_data 块来调整 cache 的状态。\par
+
+\textbf{访问异常数据块（access\_fault\_data 块）：}
+access\_fault\_data 块提供了一页被 pmpaddr、pmpcfg 设置为禁止访问的数据页。生成框架如果想要产生一个 load\_access\_fault 异常或者
+store\_access\_fault 异常就可以让 load、store 指令访问这个页，然后触发异常。\par
+
+\textbf{页错误数据块（page\_fault\_data 块）：}
+page\_fault\_data 块提供了一页被页表设置为禁止访问的数据页。生成框架如果想要产生一个 load\_page\_fault 异常或者
+store\_page\_fault 异常就可以让 load、store 指令访问这个页，然后触发异常。\par
+
+\textbf{堆栈块（stack 块）：}
+stack 块被用于作为程序的堆栈部分，该部分暂时未被启用。如果后续生成框架需要产生了类似 C 语言那样的函数调用、递归调用、局部变量等场景，可以考虑启用该块作为堆栈。\par
+
+\textbf{框架数据块（data\_frame 块）：}
+data\_frame 块用于存放框架部分代码的数据，比如 exit 块要访问的数据。\par
+
+\textbf{训练数据块（data\_train 块）：}
+data\_train 块用于存放所有 train group 需要使用的数据，例如每个 train group 的 load\_init\_train 块的寄存器初始化数据。
+理论上让每个 group 的数据跟着指令一起做 swap 是最简洁，但是因为 dcache 的数据无法被刷新，这就导致如果数据物理内存发生切换，
+并没有高效的方法让 dcache 中的数据进行同步，因此只能让 group 的数据分别使用不相交的地址空间。\par
+
+\textbf{受害数据块（data\_victim 块）：}
+data\_victim 块用于存放 victim group 需要使用的数据，例如 victim group 的 load\_init 块的寄存器初始化数据。\par
+
+\textbf{解码数据块（data\_decode 块）：}
+data\_decode 块用于存放 decode group 需要使用的数据，例如 decode group 的 load\_init 块的寄存器初始化数据。\par
+
+\subsubsection{地址分布}
+
+本章节我们介绍生成框架的地址分布和地址管理。生成框架下处理器内存的物理地址范围是 0x80000000-0x80040000，总计 64 KB 的内存范围。
+因为生成框架生成的代码可能同时包含了 M 态、S 态、U 态执行的代码，对于不同特权态下运行的代码需要生成不同的逻辑地址。
+对于 M 态的代码，其逻辑地址和物理地址保持一致，地址格式为 0x800xxxxx。对于 U 态的代码则在物理地址的基础上加一个常数偏移量作为逻辑地址，
+地址格式为 0x000xxxxxxx。对于 S 态的代码因为页表项 U 位的设置无法和 U 态的代码共用一份逻辑地址，因此加上另一个常数偏移量，地址格式为
+0xfffxxxxx。\par
+
+测试程序生成的 section，每个 section 的虚拟地址范围、物理地址范围和权限，每个 section 的代码块、
+数据块组成参见表\ref{table:section-dist}、\ref{table:group-dist}：
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{section地址排布} 
+    \label{table:section-dist}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|l|l|l|} 
+            \hline
+            \textbf{section名称} & \textbf{包含的block} & \textbf{物理地址 start} & \textbf{S 模式虚拟地址 start} & \textbf{U 模式虚拟地址 start} & \textbf{内存长度 len} & \textbf{权限} \\
+            \hline
+            .init       &   init 块     &   0x80000000  &   \textasciitilde &   \textasciitilde &   1K  &   物理模式访问     \\ 
+            .pagetable  &   pgtlb块     &   0x80001000  &   \textasciitilde &   \textasciitilde &   3K  &   物理模式访问     \\
+            .secret     &   secret块    &   0x80004000  &   0xfff04000      &   0x00004000      &   1K  &   URW             \\ 
+            .channel    &   channel块   &   0x80005000  &   0xfff05000      &   0x00005000      &   4K  &   URW             \\ 
+            .mtrap      &   mtrap块     &   0x80009000  &   \textasciitilde &   \textasciitilde &   1K  &   物理模式访问     \\
+            .strap      &   strap块     &   0x8000a000  &   0xfff0a000      &   0x0000a000      &   1K  &   RWX             \\
+            .text\_frame &   init\_bim块  &   0x8000b000  &   0xfff0b000      &   0x0000b000      &   1K  &   RX              \\
+            .random\_data&   random\_data块&  0x8000c000  &   0xfff0c000      &   0x0000c000      &   2K  &   RW              \\
+            .data\_frame &   data\_frame块&   0x8000e000  &   0xfff0e000      &   0x0000e000      &   1K  &   RW              \\
+            .data\_frame &   data\_victim块&  0x8000f000  &   0xfff0f000      &   0x0000f000      &   1K  &   RW              \\
+            .data\_frame &   data\_decode块&  0x80010000  &   0xfff10000      &   0x00010000      &   1K  &   RW              \\
+            .data\_frame &   data\_train块&   0x80011000  &   0xfff11000      &   0x00011000      &   1K  &   RW              \\
+            .text\_swap  &   见表\ref{table:group-dist}  &   0x80020000  &   0xfff20000      &   0x00020000      &   1K  &   RX              \\
+            .dummy\_data &   dummy\_data块&   0x80038000  &   0xfff38000      &   0x00038000      &   4K  &   RW              \\
+            .access\_fault\_data  &   access\_fault\_data块 &   0x8003c000  &   0xfff3c000  &   0x0003c000  &   1K  &   不可访问 \\
+            .page\_fault\_data    &   page\_fault\_data块   &   0x8003d000  &   0xfff3d000  &   0x0003d000  &   1K  &   物理模式访问 \\
+            .stack      &   stack块     &   0x8003e000  &   0xfff3e000  &   0x0003e000  &   2K  &  RW \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{group地址排布} 
+    \label{table:group-dist}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|} 
+            \hline
+            \textbf{group名称} & \textbf{包含的block} \\
+            \hline
+            train group  & load\_init\_train 块，nop 块，train 块，nop\_return 块，return 块 \\
+            victim group & load\_init 块，nop 块，secret\_migrate 块，delay 块，trigger 块，access\_secret 块，encode 块，return 块 \\
+            decode group & load\_init 块，nop 块，delay 块，replace 块，decode 块，return 块 \\
+            exit group   & exit 块 \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+参照表中对于各个部分的地址分配和权限分配， 生成框架的 PageTableManager 生成页表的数据段，
+包括虚拟地址和物理地址的映射，以及访问权限的设置。
+其中对于用户态的代码和数据页都需要一个额外的内核态的页表项进行映射，
+确保当程序在 S 模式执行时仍然可以顺利执行。生成框架的 LinkManager 生成对应的链接脚本，将各个段链接起来。\par
+
+\subsection{策略生成}
 
