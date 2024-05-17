@@ -2,4 +2,4 @@
 
 .PHONY: zjuthesis
 zjuthesis:
-	latexmk
+	latexmk -shell-escape
