@@ -491,12 +491,19 @@ access\_secret 块用 get\_secret 块代替，避免修改cache、内存的状�
 
 \subsubsection{秘密数据泄露检验}
 
-我们采用差分测试的方法对测试程序是否发生瞬态执行漏洞攻击进行检验。
+我们采用差分测试的方法对测试程序是否发生瞬态执行漏洞攻击进行检验，如图\ref{paper:differential-test}所示。
 首先将上述的所有 group 和其他框架代码导出为完整的测试程序，在处理器 RTL 上模拟执行。
 为了测量测试程序的执行时间，生成框架会在程序结尾插入特殊 label 指令，
 然后对 RTL 进行内部插桩，当该 label 指令被执行时 dump 此时的处理器周期数。
 之后将测试程序的 secret 部分替换掉，再次进行模拟执行和 dump 执行结束时的处理器周期数。
 如果两者的执行时间存在差异就说明 secret 信息通过时间侧信道泄露出来了，瞬态执行攻击成功，得到完整 PoC。
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/differential-test.png}
+    \caption{差分测试流程}
+    \label{paper:differential-test}
+\end{figure}
 
 \section{测试程序生成框架的实现}
 
@@ -659,7 +666,7 @@ inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ �
 因此本工作选择直接改写了处理器的 memory 单元，并暴露软件接口来进行物理内存的直接切换，
 这样切换的效率最高，对 icache、dcache 的影响最小。\par
 
-\textbf{内存初始化配置}
+\textbf{内存初始化配置：}
 为了便于改写后的内存单元对内存进行管理和切换，生成框架在生成二进制程序的同时，还会生成一个 libconfig 格式的 config 文件，
 用于指示内存单元如何进行内存初始化。config 文件的格式如图\ref{code:memory-config}所示。\par
 
@@ -692,7 +699,8 @@ inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ �
 \end{figure}
 
 config 的 start\_addr 和 memory\_region 字段表示所需内存的起始地址和长度，内存单元在初始化时会根据这两个字段产生对应大小的内存区域。
-memory\_regions 序列表示了需要被内存单元载入的内存块序列的具体信息。start\_addr 表示该内存块的起始地址，max\_len 表示该内存块需要的内存范围，
+memory\_regions 序列表示了需要被内存单元载入的内存块序列的具体信息。start\_addr 表示该内存块的起始地址，max\_len 表示该内存块需要的内存范围
+因为 memory\_region 以页为最小管理单位，所以其中 start\_addr 是页对齐的，max\_len 是 4K 的整数倍长度；
 init\_file 为该内存块指令或者数据所在的 binary 文件的路径。type 表示内存块的种类，如果是 dut 表示这是一个普通的内存块，
 程序的框架代码例如 trap 块、init 块、数据部分等不会被切换的内存区域就会被设置为 dut 类型。
 内存单元为这个内存块分配 start\_addr-start\_addr+max\_len 的内存范围，然后读取 init\_file 中的二进制内容作为这部分内存的值，
@@ -708,3 +716,77 @@ swap mem\_region 的数据不会被直接初始化到内存单元中，而是会
 
 在本工作的场景下，所有的 swap mem\_region 共用同一个物理内存地址范围，所以需要额外确保所有的 swap mem\_region 的 start\_addr
 和 max\_len 保持一致。\par
+
+\textbf{Swappable Memory：}
+我们用 C++ 程序实现可物理内存切换的内存单元 Swappable Memory，然后用 DPI-C 接口，将它集成到处理器 Verilog 代码框架之中。
+Swappable Memory 提供的核心数据结构和函数接口如图\ref{code:swappable-memory}所示，
+具体代码实现请参考asic/sim/mem\_swap.hpp和asic/sim/mem\_swap.cpp。\par
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minted}{cpp}
+        class SwappableMem {
+            std::vector<uint8_t *> mem_region_keeper;
+            uint8_t **mem_block_array;
+            int current_swap;
+            std::queue<int> swap_schedule;
+            std::map<int, std::vector<SwapBlock>> swap_block_map;
+        public:
+            SwappableMem() : mem_begin(0), mem_len(0), mem_block_array(nullptr), current_swap(-1) {}
+            void initial_mem(size_t mem_start_addr, size_t max_mem_size, std::vector<int>& schedule_list);
+            void register_swap_blocks(size_t block_begin, size_t block_len, std::string &file_name, int swap_index);
+            void register_normal_blocks(size_t block_begin, size_t block_len, std::string &file_name);
+            void do_mem_swap();
+            void write_byte(size_t addr, uint8_t data);
+            uint8_t read_byte(size_t addr);
+            void print_swap_mem();
+        };
+    \end{minted}
+    \caption{swappable memory}
+    \label{code:swappable-memory}
+\end{figure}
+
+1.内存初始化：在处理器测试程序一开始执行的时候，SwappableMem 根据 memory config 文件中对 memory region 的定义，进行内存初始化。
+SwappableMem 的 initial\_mem 函数根据 start\_addr 和 max\_mem\_size 字段产生一个 max\_mem\_size/4K 大小的指针数组 mem\_block\_array，
+每个表项用于指向对应的页数据。每一个 dut mem\_region 表项通过 register\_normal\_blocks 生成一个大小为 max\_len、载入对应文件二进制数据的连续内存，
+然后 mem\_block\_array 对应的页表项指向 normal mem\_region 的页起始地址，用这样的方法将内存单元的一个 dut 内存区域载入对应的指令和数据。
+每一个 swap mem\_region 表象通过 register\_swap\_blocks 函数生成一个生成一个大小为 max\_len、载入对应文件二进制数据的连续内存，
+它的 swap\_id 和 mem\_region 被保存到 swap\_block\_map 当中，而 swap\_list 的数据被保存到 swap\_schedule 当中。
+初始完成后的 SwappableMem 数据布局如图\ref{paper:swap-mem-init}所示。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/swap-mem-init.png}
+    \caption{SwappableMem 初始化}
+    \label{paper:swap-mem-init}
+\end{figure}
+
+2.内存读写操作：内存单元的读操作通过 dpi-c 接口调用 SwappableMem 的 read\_byte 函数执行。该函数传入物理地址返回对应的字节。
+首先根据转入的物理地址 addr 计算对应的页号和页内偏移，然后根据页号查找 mem\_block\_array 对应表现的数组指针（如图\ref{paper:swap-mem-addr}步骤①），如果指针为空，
+则说明内存没有被分配，分配一个全 ff 的内存，然后读取数据；不然根据指针找到对应的 mem\_region 页，
+然后根据页内偏移即可定位待操作的字节（如图\ref{paper:swap-mem-addr}步骤②），
+然后读取该字节的数据即可。写操作利用 dpi-c 接口调用 SwappableMem 的 write\_byte 函数执行，
+它采用和 read\_byte 一样的方式找到对应的字节，然后进行数据写入。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/swap-mem-addr.png}
+    \caption{SwappableMem 地址定位}
+    \label{paper:swap-mem-addr}
+\end{figure}
+
+3. 内存切换操作：内存单元的切换操作通过 SwappableMem 的 do\_mem\_swap 函数执行。current\_swap 记录了当前切换的 swap mem\_region 在
+swap\_schedule 的序号，然后将 current\_swap 递增，得到下一个需要切换的 swap mem\_region 的 swap\_id，然后通过查询 swap\_block\_map 
+找到对应的 swap mem\_region。最后将 mem\_block\_array 对应地址范围的页表项指针指向该 mem\_region 的页起始地址即可。
+整个 swap\_schedule 的切换流程如图\ref{paper:swap-mem-swap}所示。
+因为所有 swap mem\_region 共用物理地址，所以该操作也同时移除了物理内存中的上一个 swap mem\_region。
+如果 swap\_schedule 的所有 swap mem\_region 都被切换使用，程序异常终止，但是生成的测试程序保证处理器在最后一个 swap mem\_region 终止，
+故而可以规避这一问题。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/swap-mem-swap.png}
+    \caption{SwappableMem 内存切换}
+    \label{paper:swap-mem-swap}
+\end{figure}
+
