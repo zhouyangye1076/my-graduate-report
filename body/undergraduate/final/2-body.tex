@@ -653,7 +653,58 @@ inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ �
 程序执行时需要这些指令可以在相同的地址上被执行，因此需要有软硬件机制实现物理内存的指令切换，
 根据设计部分的介绍可以知道，这里的物理地址切换是以 group 为单位进行的。
 纯软件的物理地址切换可以考虑在执行下一个 group 之前拷贝它的 group 代码覆盖上一个 group 的代码，
-这样虽然确保 group 使用同样的物理地址，但是拷贝本身的 overhead 较大，且严重影响数据 cache 的布局，并且还要解决 icache 的同步问题，
+这样虽然确保 group 使用同样的物理地址，但是拷贝本身的 overhead 较大，
+且严重影响数据 cache 的布局，并且还要解决 icache 的同步问题，
 使用效果并不理想；此外也可以通过修改修改页表让不同的 group 共用相同的逻辑地址，但是无法用于物理地址模式下的内存切换。
-因此本工作选择直接改写了处理器的 memory 单元，并暴露软件接口来进行物理内存的直接切换，这样切换的效率最高，对 icache、dcache 的影响最小。\par
+因此本工作选择直接改写了处理器的 memory 单元，并暴露软件接口来进行物理内存的直接切换，
+这样切换的效率最高，对 icache、dcache 的影响最小。\par
 
+\textbf{内存初始化配置}
+为了便于改写后的内存单元对内存进行管理和切换，生成框架在生成二进制程序的同时，还会生成一个 libconfig 格式的 config 文件，
+用于指示内存单元如何进行内存初始化。config 文件的格式如图\ref{code:memory-config}所示。\par
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minted}{json}
+        start_addr = 2147483648L;
+        max_mem_size = 262144;
+        memory_regions = (
+            {
+                type = "dut";
+                start_addr = 2147483648L;
+                max_len = 61440;
+                init_file = "origin_common.bin";
+                swap_id = 0;
+            },
+            ...
+            {
+                type = "swap";
+                start_addr = 2147614720L;
+                max_len = 4096;
+                init_file = "text_swap_0.bin";
+                swap_id = 0;
+            }
+        );
+        swap_list = [1, 0];
+    \end{minted}
+    \caption{memory config}
+    \label{code:memory-config}
+\end{figure}
+
+config 的 start\_addr 和 memory\_region 字段表示所需内存的起始地址和长度，内存单元在初始化时会根据这两个字段产生对应大小的内存区域。
+memory\_regions 序列表示了需要被内存单元载入的内存块序列的具体信息。start\_addr 表示该内存块的起始地址，max\_len 表示该内存块需要的内存范围，
+init\_file 为该内存块指令或者数据所在的 binary 文件的路径。type 表示内存块的种类，如果是 dut 表示这是一个普通的内存块，
+程序的框架代码例如 trap 块、init 块、数据部分等不会被切换的内存区域就会被设置为 dut 类型。
+内存单元为这个内存块分配 start\_addr-start\_addr+max\_len 的内存范围，然后读取 init\_file 中的二进制内容作为这部分内存的值，
+域。\par
+
+如果 type 的类型是 swap，则说明这些内存区域是会被切换的，train group、victim group、decode group 因为会被切换地址范围，
+所以被设置为 swap 类型，我们称这部分 memory 为 swap mem\_region。
+swap mem\_region 的数据不会被直接初始化到内存单元中，而是会额外分配一块处理器不可达的内存空间 swap mem\_region array 
+暂时存放这些内存区域的内容，等需要切换这块内存区域的时候，再将 swap mem\_region array 中的内存区域替换到内存单元中。
+为了便于 swap mem\_region 的切换和管理，config 的 memory\_region 结构还包含一个 swap\_id 字段，为每个 swap mem\_region
+提供了唯一的 swap 编号（这个编号对于 dut 类型的内存区域没有意义），并维护了一个 swap\_list 的数组。
+当处理器执行内存切换的时候，内存单元将按照 swap\_list 中的 swap\_id 依次切换为对应的内存。\par 
+
+在本工作的场景下，所有的 swap mem\_region 共用同一个物理内存地址范围，所以需要额外确保所有的 swap mem\_region 的 start\_addr
+和 max\_len 保持一致。\par
