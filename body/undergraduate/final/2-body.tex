@@ -1404,3 +1404,247 @@ load buffer 中的数据会被写入 cacheline。因此在 memory 和 cache 之�
 secert\_migrate 块在其他所有块都生成完毕后生成。然后 secret\_migrate 块选择没有被 load\_init 块初始化的寄存器作为内部使用的寄存器，
 这样就可以避免 secret\_migrate 块修改的寄存器值被后续的代码块使用。另外，三种类型的 secret\_migrate 块长度是互不相同的，
 为了方便程序仅仅替换 secret\_migrate 块的迁移类型时不会影响其他代码块的地址布局，这里还需要额外补充 nop 指令，确保三种类型的 secret\_migrate 块长度相同。\par
+
+\section{评估及结果分析}
+
+在本章节，我们对瞬态漏洞测试程序生成框架进行评估，以体现我们测试程序生成框架的高效性和高覆盖率。
+对于瞬态窗口触发部分，我们对 train 块的三种变体进行测试，比较体现我们单条指令-地址敏感设计的有效性，
+以及瞬态窗口触发类型挖掘的高覆盖率。随后我们对整体的瞬态漏洞测试程序生成进行评估，
+通过统计挖掘完整瞬态漏洞 PoC 的时间开销和类型覆盖率，验证我们设计的高效性。
+最后我们对特定的瞬态漏洞侧信道进行定向发掘，通过和 SpecDoctor 的挖掘时间进行横向对比，验证我们设计的高效性。\par
+
+\subsection{评估环境和测试框架搭建}
+
+为了进行 riscv 处理器的仿真和测试，我们使用硬件修改后的开源处理器评估框架 starship 的作为测试平台，
+使用 BOOM 处理器作为瞬态漏洞挖掘的开源 riscv 处理器，使用 vcs 作为处理器仿真执行的综合工具。
+本实验在 32 物理核，3.4GHz主频，128G内存的 AMD 5950X 服务器上进行测评。\par
+
+测试框架有两阶段组成。阶段 1 如图\ref{paper:stage1-test}所示，首先随机产生一个测试框架代码块配置，
+然后生成 train group、trigger group 的代码，执行 starship 平台的
+riscv BOOM 处理器仿真测试，如果检测到瞬态窗口触发就保存这个 trigger 样例，
+进入下一阶段，不然就产生一组新的配置继续生成新的测试代码。
+每轮迭代的配置和生成结果都会被暂存起来，供后续数据分析。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/stage1-test.png}
+    \caption{阶段1测试}
+    \label{paper:stage1-test}
+\end{figure}
+
+阶段 2 如图\ref{paper:stage2-test}所示，在阶段 1 的 trigger 样例的基础上产生阶段二的代码块配置，
+继而生成后续的 trans 部分和 decode group，然后在 starship 平台执行 riscv BOOM 处理器的差分测试，
+如果检测到执行时间不一致就保存这个 leak 样例。
+每轮迭代的配置和生成结果都会被暂存起来，供后续数据分析。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/stage2-test.png}
+    \caption{阶段2测试}
+    \label{paper:stage2-test}
+\end{figure}
+
+\subsection{触发瞬态窗口效率评估}
+
+为了检验生成框架使用单条指令-地址敏感的训练代码生成策略的有效性，我们分别使用 train 块的变体 V1（单条指令-地址对齐）、
+V2（单条指令-地址不对齐）、V4（多条指令）生成 train 部分的代码，然后分别用 stage 1 测试框架进行 1 小时的测试，
+然后对瞬态窗口触发程序生成的轮数、找到的瞬态窗口个数、瞬态窗口类型占比等进行统计。\par
+
+\subsubsection{测试结果分析}
+
+V1、V2、V4进行一个小时测试之后，我们对各个变体找到的瞬态窗口类型进行统计。经过统计我们发现，train group 规约之后，trigger 指令
+最多经过一个 train group 的训练就可以触发瞬态窗口，因此在表征触发瞬态窗口的类别时，我们使用 trigger 指令的类型和训练 trigger 指令的
+train 指令的类型的组合进行表示。表\ref{table:v1-trans}、\ref{table:v2-trans}、\ref{table:v4-trans}，
+依次展示了 V1、V2、V4 找到的瞬态窗口种类、该类瞬态窗口的个数、该类瞬态窗口在大类中占比等信息。\par
+
+V1 在单条指令、地址对齐的情况下测试 1 hour，共进行了 447 轮迭代，找到 228 个瞬态窗口。其中 jalr 跳转预测错误类型 5 类 67 个，
+v4 存储预测错误类型 2 类 39 个，return 返回地址预测错误类型 2 类 35 个，branch 分支预测错误类型 3 类 30 个，
+meltdown 异常延迟检测类型 6 类 57 个。其中通过训练触发的瞬态窗口共计 106 个。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{V1 瞬态窗口统计} 
+    \label{table:v1-trans}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|l|l|l|l|} 
+            \hline
+            \textbf{trigger 类别} & \textbf{train 类别} & \textbf{瞬态窗口格数} & \textbf{大类占比} & \textbf{trigger 类别} & \textbf{train 类别} & \textbf{瞬态窗口格数} & \textbf{大类占比}\\
+            \hline
+            JALR                &BRANCH\_TAKEN      &4  &5.97\%   &BRANCH              &BRANCH\_NOT\_TAKEN &11 &36.67\%  \\
+            JALR                &JALR               &33 &49.25\%  &BRANCH              &NONE               &15 &50.00\%  \\
+            JALR                &RETURN             &14 &20.90\%  &BRANCH              &BRANCH\_TAKEN      &4  &13.33\%  \\
+            JALR                &CALL               &13 &19.40\%  &STORE\_ACCESS\_FAULT&NONE               &10 &100.00\% \\
+            JALR                &JMP                &3  &4.48\%   &STORE\_PAGE\_FAULT  &NONE               &12 &100.00\% \\
+            V4                  &NONE               &34 &87.18\%  &STORE\_MISALIGN     &NONE               &3  &100.00\% \\
+            V4                  &AMO                &5  &12.82\%  &LOAD\_ACCESS\_FAULT &NONE               &15 &100.00\% \\
+            RETURN              &CALL               &31 &88.57\%  &LOAD\_PAGE\_FAULT   &NONE               &15 &100.00\% \\
+            RETURN              &JALR               &4  &11.43\%  &LOAD\_MISALIGN      &NONE               &2  &100.00\% \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+V2 在单条指令、地址可以不对齐的情况下测试 1 hour，共进行了 453 轮迭代，找到 134 个瞬态窗口。其中 jalr 跳转预测错误类型 3 类 8 个，
+v4 存储预测错误类型 4 类 37 个，branch 分支预测错误类型 1 类 26 个，
+meltdown 异常延迟检测类型 6 类 63 个。其中通过训练触发的瞬态窗口共计 12 个。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{V2 瞬态窗口统计} 
+    \label{table:v2-trans}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|l|l|l|l|} 
+            \hline
+            \textbf{trigger 类别} & \textbf{train 类别} & \textbf{瞬态窗口格数} & \textbf{大类占比} & \textbf{trigger 类别} & \textbf{train 类别} & \textbf{瞬态窗口格数} & \textbf{大类占比}\\
+            \hline
+            JALR                    &JALR     &3  &37.50\%   &BRANCH                  &NONE     &26 &100.00\%  \\
+            JALR                    &RETURN   &4  &50.00\%   &LOAD\_MISALIGN          &NONE     &7  &100.00\%  \\
+            JALR                    &CALL     &1  &12.50\%   &LOAD\_PAGE\_FAULT       &NONE     &12 &100.00\%  \\
+            V4                      &NONE     &33 &89.19\%   &LOAD\_ACCESS\_FAULT     &NONE     &11 &100.00\%  \\
+            V4                      &RETURN   &1  &2.70\%    &STORE\_MISALIGN         &NONE     &5  &100.00\%  \\
+            V4                      &AMO      &2  &5.41\%    &STORE\_PAGE\_FAULT      &NONE     &12 &100.00\%  \\
+            V4                      &STORE    &1  &2.70\%    &STORE\_ACCESS\_FAULT    &NONE     &16 &100.00\%  \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+V4 在多条随机指令的情况下测试 1 hour，共进行了 411 轮迭代，找到 120 个瞬态窗口。其中 jalr 跳转预测错误类型 1 类 2 个，
+v4 存储预测错误类型 1 类 32 个，branch 分支预测错误类型 1 类 34 个，return 返回地址预测错误类型 1 类 1 个，
+meltdown 异常延迟检测类型 6 类 51 个。其中通过训练触发的瞬态窗口共计 0 个。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{V4 瞬态窗口统计} 
+    \label{table:v4-trans}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|l|l|l|l|} 
+            \hline
+            \textbf{trigger 类别} & \textbf{train 类别} & \textbf{瞬态窗口格数} & \textbf{大类占比} & \textbf{trigger 类别} & \textbf{train 类别} & \textbf{瞬态窗口格数} & \textbf{大类占比}\\
+            \hline
+            LOAD\_MISALIGN        &NONE &4  &100.00\% &            RETURN              &NONE &1  &100.00\%\\
+            LOAD\_PAGE\_FAULT     &NONE &10 &100.00\% &            JALR                &NONE &2  &100.00\%\\
+            LOAD\_ACCESS\_FAULT   &NONE &11 &100.00\% &            BRANCH              &NONE &34 &100.00\%\\
+            STORE\_MISALIGN       &NONE &6  &100.00\% &            V4                  &NONE &32 &100.00\%\\
+            STORE\_PAGE\_FAULT    &NONE &10 &100.00\% & & & & \\
+            STORE\_ACCESS\_FAULT  &NONE &10 &100.00\% & & & & \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+\subsubsection{训练块生成策略对比}
+
+\textbf{V1 与 V2 的对比：}
+这里将单条指令对齐的训练块生成策略 V1 和单挑指令不对齐的策略 V2 的测试结果进行对比，
+以此体现训练指令地址敏感对于训练能力提高的重要性。
+可以看到对于不需要训练的瞬态窗口触发类型，V1 和 V2 能找到相近个数的瞬态窗口，训练能力保持一致。
+但是对于需要训练的瞬态窗口，V1 类型可以找到 10 种、共计 106 个瞬态窗口，
+远远高于 V2 的 6 种、共计 12 个瞬态窗口。可以看到对于控制流类型的瞬态窗口触发指令，
+例如分支预测错误、跳转目标预测错误、返回地址预测错误类型的 trigger 指令在训练时是地址极其敏感的，
+有意识地让训练块进行地址对齐可以大大提高 trigger 指令训练的成功率。但是我们也可以看到 V2 找到了
+两种 V1 没有找到的训练类型，即用 return 指令和 store 指令进行训练，也许说明不对齐的 V2 变体
+有时可以覆盖一些极其罕见的训练情况，故而 V2 变体在瞬态漏洞挖掘是可以作为 V1 的补充协同工作。\par
+
+\textbf{V2 与 V4 的对比：}
+这里将单挑指令不对齐的训练块生成策略 V2 和 多条指令的训练块生成策略 V4 的测试结果进行对比，
+以此说明训练指令条数的增加对于训练能力的提高意义不大，进而为单挑指令训练的有效性提供依据。
+可以看到 V4 类型因为产生的指令条目更多，训练代码更复杂，所以产生的测试程序更少，比 V2 少了 42 次迭代。
+而无论是触发的瞬态窗口的种类，还是触发的瞬态窗口在迭代中的占比，V2 都和 V4 相近，甚至在这次测试中 V4 略低于 V2。
+所以在多数情况下 V4 生成更多的训练指令并不能带来瞬态窗口触发上的收益，反而会降低测试程序生成的效率。
+因此 V4 应该仅作为 V1 和 V2 的补充，而不能作为重要的生成策略。\par
+
+\subsection{瞬态窗口类型介绍}
+
+V1、V2、V4 收集到的瞬态窗口类型如表\ref{table:trans-summary}所示，这里我们对每种类型的机理进行简单介绍。\par
+
+\textbf{JALR+NONE 的组合}利用 jalr 指令的默认跳转目标预测。当 jalr 指令没有被训练时，
+它在分支预测时查询对应的 btb 表，如果发现对应的 btb 表项正好为空，则默认选择跳转到 PC+4 的地址，
+顺序执行下一条指令打开瞬态窗口。但是鉴于真实执行时处理器的 btb 表项大概率都已经有值了，
+所以这个触发方式不容易发生。\par
+
+\textbf{JALR+RETURN/CALL/JALR 的组合}本质上是一样的，都是用 jalr 寄存器跳转指令训练寄存器跳转指令。
+jalr指令在执行之后会将跳转的目标地址保存到处理器前端的 btb（branch target buffer）组件中，
+然后在后续的 jalr 指令预测执行时会根据查找对应的 btb 表项得到预测的跳转地址，从而错误地进入瞬态窗口。
+该类型就是在训练时用 jalr 指令跳转进入瞬态窗口地址，将瞬态窗口地址写入 btb，
+使得 trigger 块的 jalr 错误的预测进入瞬态窗口。为了让训练的 jalr 指令和 trigger 块的 jalr
+共用 btb 表项，所以这里的 jalr 指令需要地址对齐。\par
+
+\textbf{JALR+JMP/BRANCH 的组合}也是用 jmp 指令和 branch 指令训练了 jalr 指令的 btb 表项，
+但是 jmp 指令和 branch 指令的跳转地址本身其实不需要被预测，它们的跳转目标并不应该
+修改 btb 表项，这侧面反映了 BOOM 的 btb 更新策略存在过度更新的漏洞。\par
+
+\textbf{RETURN+CALL 的组合}通过训练处理器的 RSB（return stack buffer）触发瞬态窗口。
+call 指令执行时会将 pc+4 缓存到 rsb 种作为之后 return 指令的返回地址。我们只需要让
+call 指令的下一条指令的地址是瞬态窗口的入口，return 指令预测执行的时候就会进入瞬态窗口。
+这里的 call 和 return 指令并不需要地址对齐也可以触发这个机制。\par
+
+\textbf{RETURN+JALR 的组合}利用了 return 指令本身也是 jalr 指令的特性进行工作。这说明了 return 指令
+并不仅仅根据 rsb 进行跳转地址的预测，在条件合适的情况下也可以使用 btb 中的数据进行分支预测。\par
+
+\textbf{BRANCH+BRANCH\_TAKEN/BRANCH\_NOT\_TAKEN 的组合}利用了 branch 指令对 branch 指令的训练。
+当 branch 指令执行完毕后，它的跳转与否会被提交到 bim 组件中，之后 branch 再次执行时会检查 bim 部件
+对应表项的跳转与否的预测，然后进行跳转。如果需要 branch 指令错误跳转进入瞬态窗口，
+需要用 branch 指令将 bim 表项训练为 taken；如果希望 branch 指令错误不跳转进入瞬态窗口，则
+需要用 branch 指令将 bim 表项训练为 not taken。为了让训练的 branch 和触发的 branch 共用一个 bim
+表项，需要让他们地址对齐。\par
+
+\textbf{BRANCH+NONE 的组合}，因为 bim 表项在完成 bim 的初始化之后都会被初始化为 10，所以
+即使不训练 branch 指令默认也是跳转的，所以如果需要错误预测跳转，不训练也可以触发。但是在
+真是的场景下，处理器的 BIM 状态是随机的，还是需要 branch 指令将状态调整到可控的状态。\par
+
+\textbf{STORE/LOAD + ACCESS\_FAULT/PAGE\_FAULT 的组合}利用了处理器的异常延时检测技术。
+这些指令不需要被训练，当处理器遇到这些指令时首先假设这些指令是满足权限的，然后后续的指令顺序执行。
+在得到内存地址之后才开始进行权限的检测，因为权限的检测涉及到走页表、检查pmp寄存器需要比较长的时候，
+所以当权限检测错误时又将长的窗口期可以触发瞬态执行漏洞。\par
+
+\textbf{STORE/LOAD\_MISALIGN + NONE 的组合}也利用了异常的演示检测。但是因为地址不对齐可以在得到内存地址之后
+立刻进行判断，所以虽然也可以触发瞬态窗口，但是窗口期太短，实际实验表明不足以支持后续的泄露秘密数据的操作。\par
+
+\textbf{V4+NONE 的组合}利用了内存载入部件 lsu 的预测错误。当进行内存访问时，后执行的 load 指令
+假设之前发射的指令没有对需要访问的内存地址进行了修改，直接访问内存获得数据。但是之前发射的 store 指令
+在 load 之后修改了该地址的内存，导致 store 之后的指令被回滚，进而打开了瞬态窗口。该指令也不需要训练就可以触发。\par
+
+\textbf{V4+AMO/RETURN/STORE 的组合}，这是本实验发现的全新的训练组合，
+在之前的研究中并没有提到 V4 类型需要被额外训练才可以生效，是本工作的全新发现，
+但是具体训练的机制未知，有待后续进一步的研究。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{瞬态窗口统计} 
+    \label{table:trans-summary}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|} 
+            \hline
+            \textbf{瞬态窗口类别} & \textbf{预测部件} & \textbf{能否瞬态攻击} & \textbf{原理}\\
+            \hline
+            JALR+NONE               &   btb &   是  &   btb 默认预测错误      \\
+            JALR+CALL/RETURN/JALR   &   btb &   是  &   jalr训练btb导致预测错误 \\
+            JALR+BRANCH/JMP         &   btb &   是  &   jmp/branch训练btb导致预测错误 \\
+            RETURN+CALL             &   rsb &   是  &   call训练rsb导致预测错误 \\
+            RETURN+JALR             &   btb &   是  &   jalr训练btb导致预测错误 \\
+            BRANCH+NONE             &   bim &   是  &   bim初始化值预测错误 \\
+            BRANCH+BRANCH           &   bim &   是  &   branch训练bim导致预测错误 \\
+            STORE\_PAGE\_FAULT      &   无  &   是  &   异常、权限延迟检测  \\
+            STORE\_ACCESS\_FAULT    &   无  &   是  &   异常、权限延迟检测  \\
+            STORE\_MISALIGN         &   无  &   否  &   异常、权限延迟检测  \\
+            LOAD\_PAGE\_FAULT       &   无  &   是  &   异常、权限延迟检测  \\
+            LOAD\_ACCESS\_FAULT     &   无  &   是  &   异常、权限延迟检测  \\
+            LOAD\_MISALIGN          &   无  &   否  &   异常、权限延迟检测  \\
+            V4                      &   lsu &   是  &   内存未修改预测错误  \\
+            V4+AMO/STORE/return     &   lsu &   是  &   未知               \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+根据表\ref{table:trans-summary}可以看到，我们的瞬态漏洞测试程序生成框架在 1 小时内就可以找到 15 种类型的
+瞬态窗口，包含了 spectre v1-v4、ret-spectre、meltdown 类型的基本瞬态窗口类型，还发现了‘V4+AMO/STORE/return’的未知情况。
+充分证明了我们的生成框架在瞬态窗口的触发上有较高的生成效率和覆盖率。\par
+
+\subsection{完整 PoC 生成效率评估}
+
