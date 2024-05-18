@@ -969,3 +969,293 @@ data\_decode 块用于存放 decode group 需要使用的数据，例如 decode 
 
 \subsection{策略生成}
 
+为了使得 train group、victim group、decode group 中的各个代码块有较好的指令覆盖率和训练效果，
+生成框架对每一个代码块都制定了有针对性的生成策略。本章节将对每个代码块的生成策略进行详细介绍。
+为了可以对指令的字段和操作数进行约束求解，本工作使用开源的 riscv 指令生成工具razzle\cite{razzle}作为基础指令生成器。
+
+\subsubsection{延迟块（delay块）}
+delay 块的目的在于让后续的 trigger 块延迟获得操作数结果，迫使 trigger 块预测执行。为了防止延迟块的指令影响前端部件
+和内存部件的微架构状态，delay 块主要采用整数运算指令、乘除法扩展指令、单精度浮点指令和双精度浮点指令进行运算。
+为了可以让指令的计算尽可能的耗时，delay 快应该尽可能多的采用多周期指令，且指令序列之间应该有较强的数据流依赖，
+以确保指令的计算开销可以不断累加起来。\par
+
+为了检验哪些类型的指令组合可以产生较长时间的延迟，进而打开足够大的瞬态窗口，我们进行了如下实验：该实验用浮点指令组合和整型指令组合
+充当 delay 块，相邻指令之间有数据依赖，用分支预测指令作为 trigger 块，在瞬态窗口中填充 INFO\_TEXT\_START 指令。然后我们执行该测试程序，检查 rob 插桩
+监测到的 INFO\_TEXT\_START 指令条目，以此来估计瞬态窗口的大小。测试结果如表\ref{table:float-seq}、\ref{table:int-seq}所示。\par
+
+观察表\ref{table:float-seq}可以看到，一条浮点指令触发的瞬态窗口长度为 8 条指令，一条浮点指令触发的瞬态窗口长度在 14-22 条指令之间，
+三条浮点以上指令触发的瞬态窗口长度在 17-24 条指令之间，最大不超过 24 条指令。故而只要有 3-5 条指令基本上就可以有 22-24 条指令的瞬态窗口，
+继续增加浮点指令的长度并不能显著提高。故而浮点指令数目在 3-5，即可打开 20-24 大小的瞬态窗口，继续增长指令序列没有意义。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{浮点指令组合} 
+    \label{table:float-seq}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|l|l|} 
+            \hline
+            \textbf{指令类型} & \textbf{指令扩展类型} & \textbf{瞬态窗口宽度} & \textbf{指令类型} & \textbf{指令扩展类型} & \textbf{瞬态窗口宽度}\\
+            \hline
+            cvt                & 1 F/D & 8  & nmadd fsgnjx fcvt                             & 3 F/D & 21 \\
+            nmadd fcvt         & 2 F/D & 14 & nmadd fcvt   fcvt                             & 3 F/D & 21 \\
+            madd  fcvt         & 2 F/D & 14 & sgnjx fmin   fmadd  fcvt                      & 4 F/D & 24 \\
+            cvt   fcvt         & 2 F/D & 15 & sgnjx fsqrt  fsqrt  fsqrt  fcvt               & 5 F/D & 21 \\
+            sub   fcvt         & 2 F/D & 22 & add   fmax   fdiv   fmax   fcvt               & 5 F/D & 24 \\
+            sgnjn fmadd  fcvt  & 3 F/D & 17 & div   fdiv   fdiv   fidv   fidv   fdiv   fcvt & 7 F/D & 24 \\
+            madd  fmadd  fcvt  & 3 F/D & 20 &                                               &       &    \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+观察表\ref{table:int-seq}可以看到，任何指令序列都可以打开大小为 3 的瞬态窗口，这说明 branch 预测本身就会导致 3 个周期的瞬态窗口。
+3 条整形指令无法进一步扩大瞬态窗口，1 条乘除法指令和 2 条立即数指令配合可以打开 10-12 大小的瞬态窗口，
+2 条乘除法指令和 1 条立即数指令配合可以打开 20-24 大小的瞬态窗口，最大窗口不超过 24 条指令。
+可以看到只有 M 扩展的指令可以扩大瞬态窗口，其中 div/rem 指令的效果略好于 mul 指令，乘法指令在 3-5 条大概率可以打开最大瞬态窗口。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{整数指令组合} 
+    \label{table:int-seq}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|l|l|} 
+            \hline
+            \textbf{指令类型} & \textbf{指令扩展类型} & \textbf{瞬态窗口宽度} & \textbf{指令类型} & \textbf{指令扩展类型} & \textbf{瞬态窗口宽度}\\
+            \hline
+                and    and    and           & 3 I       &  3  & mulu   remu   sltu          & 1 I + 2 M &  20 \\
+                srlw   mulhsu addiw         & 2 I + 1 M &  10 & div    srli   sub           & 2 I + 1 I &  21 \\
+                mulhsu add    divu          & 2 I + 1 M &  12 & divw   addiw  div           & 1 I + 2 M &  24 \\
+                sub    divw   add           & 2 I + 1 M &  14 & mulw   sll    slliw   srli  & 3 I + 1 M &  12 \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+最终我们得到结论：序列长度为 3-5 的 M 型指令和 F 型指令混合序列即可以打开大小在 18-24 之间的瞬态窗口。这里预留了两个参数，
+一个是指令序列的长度，一个是浮点指令的占比，这两个参数可以有外部的配置生成器来产生。\par
+
+\textbf{生成寄存器依赖序列：}在 delay 块生成时，根据超参数指令序列长度和浮点指令占比，随机产生一个数据流依赖序列，然后开始根据这个依赖序列依次进行指令生成。
+考虑到 trigger 块的 trigger 指令基本都是整型指令，因此需要最后得到的计算结果需要在整型寄存器中，
+因此数据流依赖序列的最后一个寄存器为一个随机的整型寄存器。\par
+
+\textbf{生成指令序列：}之后根据依赖序列依次构造指令。
+如果源寄存器和目的寄存器都是浮点寄存器则生成浮点指令，如果都是整数寄存器则生成 M 扩展指令，
+如果一个是浮点寄存器，一个是整型寄存器，则生成整数、浮点数转换指令，由此得到指令序列。\par
+
+\textbf{事件管理：}生成框架对 delay 块做适当调整，为了监控 delay 操作的开始和瞬态窗口的关闭，在 delay 块的开始插入 INFO\_DELAY\_START 指令，在
+delay 块的末尾插入 INFO\_DELAY\_END 指令。\par
+
+\textbf{操作数调整：}因为浮点操作的计算结果很容易是全 0 和全 F 的极端值，
+这种值在特殊情况下会导致后续 trigger 指令的指令约束永远无法满足。因此这里再随机产生一条指令，让结果寄存器和一个随机数做加法，
+让计算结果几乎以 100\% 的不为全 0 和全 F。至此 delay 块生成完毕。\par
+
+\subsubsection{触发块（trigger 块）}
+触发块用于产生触发瞬态窗口的代码，主要是利用这部分代码的预测执行错误来产生错误的执行流。生成框架将瞬态窗口执行的 trigger 指令
+分为了 22 类，囊括了 rv64imafdc 的所有指令和 zicsr 扩展的部分指令。
+22 种 trigger 指令的类别、含义、需要满足的约束如表\ref{table:trigger-gen}所示。
+trigger 指令的种类被作为该块的外部配置被配置生成单元管理。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{触发块指令生成} 
+    \label{table:trigger-gen}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|} 
+            \hline
+            \textbf{指令类型} & \textbf{类别解释} & \textbf{操作数约束}\\
+            \hline
+            LOAD\_MISALIGN      &   load指令触发load\_misalign 异常           & 内存访问地址不对齐                                         \\
+            LOAD\_ACCESS\_FAULT &   load指令触发load\_access\_fault 异常      & 内存地址对齐且落在 access\_fault\_data 范围内               \\
+            LOAD\_PAGE\_FAULT   &   load指令触发load\_page\_fault 异常        & 内存地址对齐且落在 page\_fault\_data 范围内                 \\
+            STORE\_MISALIGN     &   store指令触发store/amo\_misalign 异常     & 内存访问地址不对齐                                         \\ 
+            STORE\_ACCESS\_FAULT&   store指令触发store/amo\_access\_fault 异常& 内存地址对齐且落在 access\_fault\_data 范围内               \\
+            STORE\_PAGE\_FAULT  &   store指令触发store/amo\_page\_fault 异常  & 内存地址对齐且落在 page\_fault\_data 范围内                 \\
+            AMO\_MISALIGN       &   amo指令触发store/amo\_misalign 异常       & 内存访问地址不对齐                                         \\ 
+            AMO\_ACCESS\_FAULT  &   amo指令触发store/amo\_access\_fault 异常  & 内存地址对齐且落在 access\_fault\_data 范围内               \\
+            AMO\_PAGE\_FAULT    &   amo指令触发store/amo\_page\_fault 异常    & 内存地址对齐且落在 page\_fault\_data 范围内                 \\
+            EBREAK              &   ebreak指令触发ebreak异常                  & \textasciitilde                                             \\
+            ILLEGAL             &   illegal指令触发illegal异常                & \textasciitilde                                             \\
+            ECALL               &   ecall指令触发ecall异常                    & \textasciitilde                                             \\
+            v4                  &   store指令修改access\_secret块的访问偏移地址&  操作数a0为access\_secret的访问偏移地址                      \\
+            BRANCH              &   分支预测指令，如beq、bne等                 &  跳转则跳转目标为 return 块，不跳转则下一条指令为 return 块    \\
+            JALR                &   jalr指令                                 &  跳转目标为 return 块                                        \\
+            RETURN              &   return指令                               &  跳转目标为 return 块                                        \\
+            JMP                 &   jal指令                                  &  跳转目标为 return 块                                        \\
+            INT                 &   整数运算指令和对应的压缩指令如add、sub      & \textasciitilde                                             \\
+            FLOAT               &   浮点运算指令和对应的压缩指令如fadd、fmul    & \textasciitilde                                             \\
+            LOAD                &   内存载入指令如ld、lb，且不触发异常          & 访问内存地址落在 random\_data 块范围且对齐                    \\ 
+            STORE               &   内存存储指令如sd、sb，且不触发异常          & 访问内存地址落在 random\_data 块范围且对齐                    \\ 
+            AMO                 &   原子指令且不触发异常                       & 访问内存地址落在 random\_data 块范围且对齐                    \\ 
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+\textbf{构造数据流延迟依赖：}为了让 trigger 指令的操作数被延迟获得，生成框架为 trigger 指令的源寄存器和 delay 块的计算结果 delay\_reg 的值产生数据依赖。
+因为 trigger 的指令操作数需要满足特殊的条件约束，例如访存指令只能访问给定的地址区域，跳转指令只能跳入 return 块等，因此需要对
+trigger 指令操作数的值进行约束。
+
+\textbf{操作数约束调整：}因为操作数依赖的 delay\_reg 是随机产生的，所以生成框架使用寄存器 a0 存储满足约束的调整值，
+当 a0 和 delay\_reg 相加后即可得到满足约束条件的操作数值。为了防止 a0 寄存器的值被中途改写，delay 块不允许使用 a0 寄存器参与计算。\par
+
+可以参看图\ref{code:trigger-example}的代码样例，这里 t0 寄存器是 delay 块的计算结果。a0 寄存器的参数值是 0，
+在执行 add 指令之后 a0 寄存器的值等于 t0 寄存器，且 a0 寄存器的值依赖于 t0 寄存器。之后执行 beq 指令，因为 t0、a0 都依赖于
+delay 块，所以 branch 指令会被延迟提交开始分支预测；因为 a0 参数调整使得 t0 等于 a0，所以可以跳转到 return\_block\_entry，
+进入 return 块。\par
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minted}{c}
+        add a0, t0, a0
+        beq a0, t0, return_block_entry
+    \end{minted}
+    \caption{trigger样例}
+    \label{code:trigger-example}
+\end{figure}
+
+\subsubsection{训练块（train 块）}
+训练块用于对瞬态窗口进行训练，为了覆盖尽可能多的指令种类，train 块的训练指令被细分为 12 类，囊括 rv64imafdc 的所有指令和 zicsr 的部分指令。
+所有 12 类指令的类别、含义、满足的约束如表\ref{table:train-gen}所示。
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{训练块指令生成} 
+    \label{table:train-gen}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|} 
+            \hline
+            \textbf{指令类型} & \textbf{类别解释} & \textbf{操作数约束}\\
+            \hline
+            BRANCH\_TAKEN       &   分支预测指令且发生跳转                     &  跳转目标为 return 块或者 nop\_return 块，发生跳转              \\
+            BRANCH\_NOT\_TAKEN  &   分支预测指令且不发生跳转                   &  跳转目标为 return 块或者 nop\_return 块，不发生跳转            \\
+            JALR                &   jalr指令                                 &  跳转目标为 return 块或者 nop\_return 块                                        \\ 
+            CALL                &   call指令                                 &  跳转目标为 return 块或者 nop\_return 块                                        \\
+            RETURN              &   return指令                               &  跳转目标为 return 块或者 nop\_return 块                                        \\
+            JMP                 &   jal指令                                  &  跳转目标为 return 块或者 nop\_return 块                                        \\
+            INT                 &   整数运算指令和对应的压缩指令如add、sub      & \textasciitilde                                             \\
+            FLOAT               &   浮点运算指令和对应的压缩指令如fadd、fmul    & \textasciitilde                                             \\
+            LOAD                &   内存载入指令如ld、lb，且不触发异常          & 访问内存地址落在 random\_data 块、access\_fault\_data 块和 page\_fault\_data 块内  \\ 
+            STORE               &   内存存储指令如sd、sb，且不触发异常          & 访问内存地址落在 random\_data 块、access\_fault\_data 块和 page\_fault\_data 块内  \\ 
+            AMO                 &   原子指令且不触发异常                       & 访问内存地址落在 random\_data 块、access\_fault\_data 块和 page\_fault\_data 块内  \\ 
+            SYSTEM              &   系统指令如 ecall、ebreak 等               & \textasciitilde                                             \\ 
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+train 块根据是否和 trigger 对齐、是否是单条指令共有四种变体。变体一为指令对齐且单条指令，该类型随机生成某一类指令，然后将该指令和 trigger 指令对齐，
+寄存器的值由 load\_init\_train 提供，确保操作数满足指令约束。变体二为指令不对齐且单条指令，该类型随机生成某一类指令，
+但是排布位置在 trigger 指令地址的基础上随机偏移一段距离。变体三为指令对齐且多条指令，但是并不存在多条指令都对齐的情况，因此不存在。
+变体四为指令不对齐且多条指令，该变体使用 arbitrary 块生成训练，该模块我们在后续进行介绍。\par
+
+\subsubsection{随机块（arbitrary 块）}
+为了提高测试程序的指令组合的覆盖率，生成框架需要一些纯随机的指令块进行测试。\par
+
+\textbf{随机指令生成：}生成框架提供了五类随机指令生成函数（函数功能参见表\ref{table:random-gen}），用于生成整型、浮点、内存访问、原子操作、系统调用指令。
+为了防止修改特权寄存器导致测试程序无法正常工作，这里不生成 CSR 读写指令。\par
+
+\textbf{指令块生成和组合：}arbitrary 块参考 razzle 的随机代码生成方式，首先随机生成若干个基本块，每个基本块随机用上述五个函数生成若干条指令，
+然后将这些基本块之间用 branch 和 jmp 等控制流指令连接起来，确保基本块控制流可以从第一个基本块进入，最后一个寄存块退出（触发异常退出除外）。
+对于 train 块的变体 4，我们可以使用 arbitrary 块产生多条随机的不对齐的训练指令，用于 trigger 块的训练，\par
+arbitrary 块也可以被用于其他需要随机指令生成的场景。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{随机指令生成} 
+    \label{table:random-gen}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|} 
+            \hline
+            \textbf{函数名} & \textbf{生成指令类别} & \textbf{额外约束}\\
+            \hline
+            RandomBlock.\_gen\_atomic             &  原子操作指令             & 访问内存地址落在 random\_data 块、access\_fault\_data 块和 page\_fault\_data 块内  \\
+            RandomBlock.\_gen\_float\_arithmetic   &  浮点运算指令及其压缩指令  &  \textasciitilde  \\
+            RandomBlock.\_gen\_int\_arithmetic     &  整数运算指令及其压缩指令  &  \textasciitilde  \\
+            RandomBlock.\_gen\_load\_store         &  内存访问指令及其压缩指令  & 访问内存地址落在 random\_data 块、access\_fault\_data 块和 page\_fault\_data 块内  \\
+            RandomBlock.\_system                 &  系统调用指令             &  \textasciitilde  \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+\subsubsection{秘密访问块（access\_secret 块）}
+access\_secret 块用于访问 secret 地址，将 secret 数据载入到寄存器中。这一步归根结底就是生成一个内存地址，然后进行内存的 load 操作，
+所以为了简单起见，本生成框架并不用随机生成指令来构造内存地址，而是直接先验地生成内存地址，然后使用该地址进行 load 操作。\par
+
+\textbf{地址构造：}生成的内存地址可以直接等于 secret 的地址；但是考虑到在一些内存访问的场景中，缓冲区只需要地位匹配就可以获得缓冲区缓存的数据，为了覆盖
+该种类型的漏洞，生成框架在构造地址时会将地址的高位的随机替换为一个随机数，被替换的高位在 0 位到 28 位的范围中随机选择。\par
+
+\textbf{地址获取：}load 指令的地址寄存器有两种的方法获得这个预设的访问地址。一是使用立即数指令直接构造获得；
+二是使用内存载入指令，从 data\_victim 块得到需要访问的地址。在构造 group 的时候，因为生成器需要指令的地址满足 group 间的对齐，
+所以在生成指令的时候就需要知道指令的长度，但是立即数构造指令 li 指令的长度是随着立即数的复杂程度变化的，为了防止 li 指令长度不可控，
+造成后续生成的指令不对齐，当地址被随机数高位覆盖时，只能使用方法二获得地址。此外，spectre-V4 类型的瞬态执行漏洞通过覆盖
+access\_secret 块存储的 secret 地址偏移量来触发瞬态窗口，所以如果 trigger 类型为 V4，则只能使用方法二获得地址。\par
+
+地址的构造方式和地址的获取方式可以作为外部配置，由外部的配置生成器产生。\par
+
+\subsubsection{编码块（encode 块）}
+encode 块是阶段2的核心代码块，负责在瞬态窗口中将秘密数据编码到微架构状态当中。
+encode 块需要尝试在瞬态窗口尽可能多的使用携带秘密数据的寄存器（我们称为 secret reg），
+然后尝试组合各种类型的指令，尝试将 secret 编码到各种类型的微架构部件中去。\par
+
+\textbf{控制流类型和数据流类型：}
+秘密数据既可以通过 add、load、fmul 等指令影响数据流及数据流部件，也可以通过 branch、jmp 等指令影响控制流及控制流部件。
+对于一个包含了 secret reg 的基本块，该基本块在执行的时候就会让 secret 影响微架构部件的状态，进而尝试在为架构中编码 secret，这就是数据流的情况。
+对于不包含 secret reg 的基本块，为了让该基本块的执行也可以受到 secret 的影响，可以将这个基本块包裹在一个涉及 secret reg 的分支语句当中，
+则该基本块会根据 secret 值的不同而选择被执行或者不执行，进而影响前端的控制流部件和流水线中的运算、存储部件，这就是控制流的情况。
+如果一个基本块包含 secret reg，则生成框架将它建模为数据流的情况；如果不包含 secret reg 则将它建模为控制流的情况。
+不过为了简化编码块的生成，生成框架会实现选择生成数据流的类型还是控制流类型。
+如果是数据流类型，则仅生成与 secert reg 相关的数据流指令，不生成与 secret reg 相关的控制流指令；
+如果是控制流类型，则在全局生成一个 secret reg 相关的 branch 分支，确保本体和变体可以走不同的分支，
+然后在一个分支中生成不带 secret reg 的指令块，另一个分支保持空
+（防止本体和变体编码不同的组件，导致差分测试的时间差异难以评估）。\par
+
+在构造基本块的时候，生成框架希望基本块产生的执行行为尽可能地极端，可以让流水线产生尽可能复杂、极端的执行情况。
+所以每个基本块应该尽可能集中地执行单一指令，从而让该类指令涉及到的微架构部件承受足够大的压力，
+从而在一些边界条件触发瞬态漏洞，错误地编码 secret 信息。因此生成框架根据指令类型将基本块分为了
+整数操作、浮点操作、内存访问、原子操作、系统调用、函数调用返回、分支预测、跳转八大类。
+为了让流水线的执行行为尽可能地复杂，基本块的指令之间最好有较强的竞争依赖，比如数据竞争和结构竞争。
+最后为了让 secret 信息尽可能多的影响处理器，指令应该尽量使用 secret reg 作为操作数，
+并将非 secret reg 作为目的寄存器，在尽可能多使用 secret 的同时，尽可能多的传播 secret。\par
+
+\textbf{secret 传播：}
+为了让 secret reg 尽可能的被指令使用，也为了让 secret 尽可能多的传播，
+生成框架在构造基本块的时候会维护一个 secret reg 集合和一个非 secret reg 的 normal reg 集合。
+之后在依次生成基本块的指令时，以较大概率选用 secret reg 集合的寄存器作为指令的源寄存器，
+以较大概率选用 normal reg 集合的寄存器作为指令的目的寄存器。
+指令生成完毕之后，根据目的寄存器是否获得或者失去了 secret 信息，
+对 normal reg 和 secret reg 集合进行更新调整，确保集合信息正确。
+因为浮点指令、基本指令、压缩指令使用的寄存器范围互不相同，因此在选择寄存器时需要做额外细化的筛选，
+确保每个指令可以获得满足其指令集定义的寄存器，而不是仅仅获得 secret reg 或者 normal reg 集合中的寄存器。
+此外，因为指令尽可能多的使用了 secret reg，而 secret reg 中的指令都是随着 access\_secret 产生的 secret reg
+通过数据流依赖传播过来的，所以这些指令之间很容易产生数据流依赖，可以同时满足指令间复杂依赖的要求。\par
+
+\textbf{整数操作基本块和浮点操作基本块：}
+
+
+\subsubsection{秘密迁移块（secret\_migrate 块）}
+secret\_migrate 块用于将 secret 从 memory 转移到内存存储层次的其他存储位置，
+以检验 access\_secret 块对不同存储层次中 secret 访问成功的可能性。\par
+
+在 BOOM 处理器的环境下，secret\_migrate 块支持三种存储位置的迁移，secret 的迁移被作为该块的外部配置被配置生成单元管理：\par
+\textbf{内存 memory：}
+因为 secret 本来就在 memory 中，所以无需指令做额外调整。\par
+
+\textbf{缓存 cache：} 
+用立即数指令生成 secret 地址，然后用 load 指令显式地将 secret 载入到寄存器，
+然后将寄存器填零，即可将 secret 移入 cache 但不移入寄存器。
+因为差分测试的时候本体和变体都会执行该操作，所以虽然访问了 secret 但是不会造成执行时间的差异。\par
+
+\textbf{载入缓冲区 load buffer：}
+数据从 memory 被载入到 cache 的过程中，一个 cacheline 的数据首先会被缓存到 load buffer，等一个 cacheline 读取完毕后，
+load buffer 中的数据会被写入 cacheline。因此在 memory 和 cache 之间还有一个 load buffer 的存储层次。
+为了让 secret 进入 load buffer 但是不进入 cache，生成框架首先显式载入 secret，让 secret 进入 load buffer 和 cache，
+然后对 dummy\_data 四个页中和 cacheline 地址冲突的地址进行写操作。因为 BOOM 的 cache 是四路组关联、伪随机替换的，
+所以做四次写操作大概率可以将 cache 中的 secret 覆盖。为了防止后续的 load 操作覆盖 load buffer 中的 secret，secret\_migrate 块
+被排布在 delay 块、trigger 块之前，之后紧接着执行 access\_secret 块，尽量保证在执行 access\_secret 块前没有内存访问操作。\par
+
