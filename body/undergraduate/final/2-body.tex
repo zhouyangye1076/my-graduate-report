@@ -1221,7 +1221,9 @@ encode 块需要尝试在瞬态窗口尽可能多的使用携带秘密数据的�
 整数操作、浮点操作、内存访问、原子操作、系统调用、函数调用返回、分支预测、跳转八大类。
 为了让流水线的执行行为尽可能地复杂，基本块的指令之间最好有较强的竞争依赖，比如数据竞争和结构竞争。
 最后为了让 secret 信息尽可能多的影响处理器，指令应该尽量使用 secret reg 作为操作数，
-并将非 secret reg 作为目的寄存器，在尽可能多使用 secret 的同时，尽可能多的传播 secret。\par
+并将非 secret reg 作为目的寄存器，在尽可能多使用 secret 的同时，尽可能多的传播 secret。
+delay 块一节的实验表明，瞬态窗口的大小一般在 24 条指令以内，
+因此每个基本块长度不超过 6 条指令，总的基本块个数不超过 5 个。\par
 
 \textbf{secret 传播：}
 为了让 secret reg 尽可能的被指令使用，也为了让 secret 尽可能多的传播，
@@ -1235,8 +1237,147 @@ encode 块需要尝试在瞬态窗口尽可能多的使用携带秘密数据的�
 此外，因为指令尽可能多的使用了 secret reg，而 secret reg 中的指令都是随着 access\_secret 产生的 secret reg
 通过数据流依赖传播过来的，所以这些指令之间很容易产生数据流依赖，可以同时满足指令间复杂依赖的要求。\par
 
-\textbf{整数操作基本块和浮点操作基本块：}
+\textbf{整数操作块、浮点操作块、系统调用块：}
+这三个块的构造是平凡的，分别生成一系列整数指令、浮点指令、系统调用指令即可。在生成指令的寄存器字段的时候，
+采用 secret 传播的策略，提高 secret 的使用率和指令间的依赖程度（系统调用块没有操作数，所以不需要这一步）。
+为了确保指令的长度是可以在生成汇编时可以计算的，证书操作块不生成 la、li 等位指令。\par
 
+\textbf{内存访问块和原子操作块：}
+内存访问块和原子操作块都是涉及内存操作的，因此在执行内存操作之前需要先获得合法地址。
+因此首先插入 la 指令，获得的地址是 channel 块、random\_data 块的一些基地址 label。
+之后为了让地址可以随机一些，也为了让访问的地址可以受到 secret 的影响，生成框架按概率选择一个寄存器，
+将寄存器的值和 0x7ff 计算，然后和和 la 得到的基地值相加。
+使用 0x7ff 是为了让基地址机上偏移量之后还在 channel、random\_data 块的内部。
+然后以该地址为基地址生成多条连续内存访问指令或者原子操作指令即可，
+这里可以确保 store、load 指令在基地址的基础上加上偏移量后依然落在 channel、random\_data 块的范围内部。\par
+
+\textbf{分支预测块、函数调用返回块、跳转块：}
+分支预测块由一些列 branch 块组成，主要影响 BIM 部件；函数调用返回块由一系列 call-return 指令组成，主要影响 RSB 部件（return stack buffer）；
+跳转块由一系列 jalr、jal 指令组成，主要影响 BTB 部件（branch target buffer）。因为跳转的目标对于部件的训练本身并不具有太强的参考意义，
+同时也为了可以让控制流块的指令都可以被执行，这里每条控制流指令的跳转目标都是下一条指令。因此 branch 指令和 jmp 用下一条指令的 label 作为跳转地址，
+对于 jalr、call、return 等指令（本质上都是 jalr 系列），使用$auipc t0, 0 和 mv ra, t0$将当前的 PC 写入寄存器 t0 和 ra，然后用这两个寄存器加
+偏移量作为跳转地址，调整偏移量使得跳转地址是下一条指令的地址即可。因为三个块基本不涉及 secret reg 的使用，因此只能被放在控制流类型的场景中。\par、
+
+\textbf{块的包裹：}
+encode 块除了用于编码的基本块之外，还需要一些额外的块进行协同。首先是在所有基本块的开始插入一条 INFO\_TEXT\_START 来监控瞬态执行的开始；
+然后为了让 encode 块的大小可以和 train group 的 nop\_return 块对齐，在 encode 块的结尾加上一个用于填充的 nop 块，nop 块用 INFO\_TEXT\_END 指令和
+ebreak 结尾，分别用于监控瞬态指令内部代码的执行结束和退出 victim group 进入内存切换。\par
+
+\textbf{块的组合：}
+encode 的块序列由一组基本块序列和结尾的 nop 填充块组成，这些块依次执行。如果 encode 块是控制流类型，则在基本块中间插入一个 secret reg 相关的 branch 指令，
+让变体会跳转到 nop 块不执行后续内容，而让本体继续执行，如图\ref{paper:encode-consist}的V3、V4。如果 trigger 类型是 V4 类型，encode 的代码会被直接执行，所以生成框架让基本块都保持顺序执行，
+防止出现死循环无法停机，如图\ref{paper:encode-consist}的V2、V4；但是对于其他的 trigger 类型，encode 的基本块不会被正式执行，所以可以让最后一个基本块无条件跳转到第一个基本块，在瞬态窗口中
+充分执行 encode 基本块的指令，如图\ref{paper:encode-consist}的V1、V3。\par
+
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\linewidth]{figure/paper/encode-consist.png}
+    \caption{基本块控制流}
+    \label{paper:encode-consist}
+\end{figure}
+
+\subsubsection{解码块（decode 块）}
+decode 块和 encode 块配合使用，用于将 encode 编码在微架构状态中的 secret 利用时间侧信道解码出来。
+考虑到在同样的地址执行同样的指令往往可以使用一样的微架构组件参与执行，
+因此生成器简单的时候和 encode 块共用地址且相同的内容的代码块作为 decode 块。
+需要注意的是，encode 块内部可能存在死循环，因此 decode 块需要将这个死循环打开。
+此外 decode 块用 INFO\_LEAK\_START 和 INFO\_LEAK\_END 作为
+decode 块的开始和结束，用于表示侧信道泄露秘密数据这一过程的开始和结束。\par
+
+\subsubsection{替换块（replace 块）}
+replace 块在 decode group 中被使用，用于替换 victim group 中 trigger 块、access\_secret 块的内容，
+如果 trigger 块和 access\_secret 块的内容存在额外的 return 块，则需要将 return 块也替换掉。
+对于 trigger 块和 return 块在这里不需要被使用，所以生成框架将 replace 块中的对应区域简单的替换为 nop 指令，
+但是对于 access\_secret 块，后续的 decode 块需要从中得到和 secret 值相同的操作数，以此来复现 encode 块的指令执行，
+所以 access\_secret 块的部分被替换为立即数构造 secret 值的简单代码。
+这里需要注意的是，victim group 的指令和数据内部时携带了 return 块、access\_secret 块的 label，所以在生成 replace 块的时候
+虽然已经将 return 块、access\_secret 块的内容替换为 nop，但是需要保留它们的 label 信息且这些 label 要和 victim group 的 label 对齐。\par
+
+\subsubsection{寄存器初始化块（load\_init 块）}
+load\_init 块负责为 group 中所有没有被初始化的指令提供初始化的值。例如 delay 块的随机指令中的寄存器很多是没有赋初值的，
+需要 load\_init 块提供随机值；trigger 块和 train 块满足约束的寄存器值也是由 load\_init 计算得到的。\par
+
+\textbf{待初始寄存器收集：}
+为了给没有初始化的寄存器赋初值，load\_init块首先需要收集 group 的所有块中没有被初始化的寄存器。
+group 的每个代码块都有一些列基本块组成，
+所以生成框架首先会使用算法\ref{alg:basic-reg-analysis}计算这些基本块各自需要被额外初始化的寄存器。
+该算法遍历所有的指令，目的寄存器都被初始化了加入 has\_inited\_set，而源寄存器如果没有被初始化则加入 need\_init\_set 集合。
+这两个集合将被用于后续的进一步计算。
+因为 need\_init\_set 被要求在基本块被执行之前被初始化，所以基本块执行完毕之后，has\_inited\_set 将包含  need\_init\_set。 \par
+
+\begin{algorithm}[!h]
+    \caption{基本块寄存器分析}
+    \label{alg:basic-reg-analysis}
+    \renewcommand{\algorithmicrequire}{\textbf{Input:}}
+    \renewcommand{\algorithmicensure}{\textbf{Output:}}
+    
+    \begin{algorithmic}[1]
+        \REQUIRE basic block list of code block, block\_list  %%input
+        \ENSURE  basic block list of code block's register initialized result, block\_list  %%output
+        \FOR{$block \in block\_list$}
+            \STATE $block.need_init_set \Leftarrow \emptyset$
+            \STATE $block.has_inited_set \Leftarrow \emptyset$
+            \FOR{$inst \in block$}
+                \FOR{$dest in inst$}
+                    \STATE $block.has\_inited\_set \Leftarrow block.has\_inited\_set \bigcup dest$
+                \ENDFOR
+                \FOR{$src \in inst$}
+                    \IF{$src \notin block.has\_inited\_set$}
+                        \STATE $block.need\_init\_set \Leftarrow block.need\_init\_set \bigcup src$
+                    \ENDIF
+                \ENDFOR
+            \ENDFOR
+            \STATE $block.has\_inited\_set \Leftarrow block.has\_inited\_set \bigcup block.need\_inited\_set$
+        \ENDFOR
+        \RETURN block\_list
+    \end{algorithmic}
+\end{algorithm}
+
+因为在代码块内部，如果基本块 1 在基本块 0 之后被执行，而基本块 0 初始化了基本块 1 的待初始化寄存器，
+则该寄存器不需要被 load\_init 块额外初始化。因此生成框架还需要根据基本块之间的控制流关系，进一步细化真正需要被初始化的寄存器。
+为了表述基本块之间的控制流关系，每个基本块有 previous 和 succeed 两个变量记录能进入这个块的基本块，和这个基本块可以进入的基本块。
+使用一个迭代算法，计算每个基本块的前继块共同初始化的寄存器集合，然后该基本块的 has\_inited\_set 集合加入这部分寄存器，
+need\_inited\_set 集合减去这部分寄存器。具体的细化方式见算法\ref{alg:block-reg-analysis}。\par
+
+\begin{algorithm}[!h]
+    \caption{代码块寄存器分析}
+    \label{alg:block-reg-analysis}
+    \renewcommand{\algorithmicrequire}{\textbf{Input:}}
+    \renewcommand{\algorithmicensure}{\textbf{Output:}}
+    
+    \begin{algorithmic}[1]
+        \REQUIRE basic block list of code block, block\_list    %%input
+        \ENSURE  the set of the registe need to be initialized, need\_inited\_set  %%output
+        \STATE $need\_inited\_set \Leftarrow \emptyset$
+        \WHILE{$\bigcup block.need\_inited\_set \succ need\_inited\_set$}
+            \STATE $need\_inited\_set \Leftarrow \bigcup block.need\_inited\_set$
+            \FOR{$block \in block\_list$}
+                \STATE $block.need\_inited\_set \Leftarrow block.need\_inited\_set - \bigcap block.previous.has\_inited\_set$
+                \STATE $block.has\_inited\_set \Leftarrow block.has\_inited\_set - \bigcap block.previous.has\_inited\_set$
+            \ENDFOR
+        \ENDWHILE
+        \RETURN need\_inited\_set
+    \end{algorithmic}
+\end{algorithm}
+
+因为代码块之间也有存在基本块之间的寄存器初始化传递关系，所以以代码块为处理对象再次执行算法\ref{alg:block-reg-analysis}，
+即可收集的到所有要初始化的寄存器数组。\par
+
+\textbf{寄存器随机初始化：}
+对于已经得到的待初始化寄存器序列，生成器产生一一对应的初始化随机数和初始化代码。为了使初始化代码更加简短，这里使用压缩指令
+c.fldsp 和 c.ldsp 指令初始化浮点寄存器和通用寄存器，sp指令充当随机数序列的基地值，立即数充当序列的偏移量。考虑到 a0 寄存器被用于
+传递 trigger 块所需的特殊参数，所以 a0 块在最后被初始化。因为 sp 寄存器被用于作为内存访问的基地址，如果 sp 寄存器也需要被随机数初始化，
+则将 sp 寄存器放在初始化序列的末尾进行初始化。\par
+
+\textbf{寄存器约束值初始化：}
+对于寄存器值有约束需要求的寄存器，生成框架需要额外计算这部分寄存器需要被初始化的值，而不是简单随机生成。
+对于 load\_init\_train 块的场景可以直接根据 train 块的约束计算得到 train 指令需要的值。但是对于 load\_init 块的场景，
+要求 a0 寄存器的值和 delay 块的计算结果相加之后满足约束，所以需要事先知道 delay 块的执行结果。\par
+
+我们在开源的 riscv 模拟器 spike 的基础上进行扩展，编写了 spike-solve 程序。该程序会载入待模拟的 riscv elf 文件，然后模拟执行指定的
+前 N 条指令，并将模拟得到的浮点寄存器和通用寄存器的值 dump 出来。为了得到 delay 块的执行结果，生成框架将 load\_init 块和 delay 块的
+指令和数组组合为简单的可执行程序，然后较给 spike-solve 模拟求解，最终得到 delay 的执行结果。因为上述代码中唯一待定的 a0 寄存器的值
+不参与 delay 的计算，所以不影响最终的计算结果。之后生成框架根据 trigger 块的指令约束和 delay 的寄存器结果求解 a0 的参数值即可。
 
 \subsubsection{秘密迁移块（secret\_migrate 块）}
 secret\_migrate 块用于将 secret 从 memory 转移到内存存储层次的其他存储位置，
@@ -1259,3 +1400,7 @@ load buffer 中的数据会被写入 cacheline。因此在 memory 和 cache 之�
 所以做四次写操作大概率可以将 cache 中的 secret 覆盖。为了防止后续的 load 操作覆盖 load buffer 中的 secret，secret\_migrate 块
 被排布在 delay 块、trigger 块之前，之后紧接着执行 access\_secret 块，尽量保证在执行 access\_secret 块前没有内存访问操作。\par
 
+为了防止 secret\_migrate 块的寄存器修改影响 delay 块、load\_init 块等代码块的寄存器结果，
+secert\_migrate 块在其他所有块都生成完毕后生成。然后 secret\_migrate 块选择没有被 load\_init 块初始化的寄存器作为内部使用的寄存器，
+这样就可以避免 secret\_migrate 块修改的寄存器值被后续的代码块使用。另外，三种类型的 secret\_migrate 块长度是互不相同的，
+为了方便程序仅仅替换 secret\_migrate 块的迁移类型时不会影响其他代码块的地址布局，这里还需要额外补充 nop 指令，确保三种类型的 secret\_migrate 块长度相同。\par
