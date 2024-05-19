@@ -163,8 +163,9 @@ SpeechMiner\cite{xiao2019speechminer}通过测量竞争条件判断漏洞的可�
 以满足特定的数据流和控制流约束；
 其次，为了高效地生成能触发瞬态窗口的代码，
 生成框架需要有意识地为瞬态窗口触发指令设计和排布训练代码；
-最后，为了生成有效的测试程序，生成框架需要将零散生成的瞬态执行漏洞各阶段
-的代码有效组合起来，并且删除一些冗余的代码，提取出精简的测试程序。
+最后，为了生成有效的测试程序，生成框架需要让程序的各个语义部分可以相互适配，
+协同工作，因此生成框架需要根据语义对测试程序代码块合理划分和针对性生成，
+然后将各阶段代码块有效组合起来，最终删除一些冗余的代码，提取出精简的测试程序。
 
 \subsection{带约束的指令生成}
 \textbf{约束指令操作数}。
@@ -200,10 +201,14 @@ SpecDoctor\cite{hur2022specdoctor}都是用随机代码生成的方式进行瞬�
 
 \subsection{完整程序的生成}
 
-\textbf{程序的组合}。
+\textbf{程序的模块分割}。
 已知完整的瞬态执行漏洞程序由触发瞬态窗口、访问秘密数据、侧信道泄露秘密数据三部分代码组成，
-因此生成框架需要将生成得到的三部分代码进行有效的地址排布和控制流约束，确保三部分代码能够依次执行，
-从而组成完整有效的瞬态漏洞程序。这要求我们通过总结分析三部分代码内部的指令排布和代码间的指令排布的关系，
+为了提高生成框架对瞬态执行程序语义的利用，生成框架可以将三阶段代码进行进一步细分，并赋予每个
+阶段更精确的功能语义，然后根据各个代码块工作的需要提供更有针对性的生成策略。\par
+
+\textbf{程序的组合}。
+为确保分割后的代码能够按场景依次执行、协同工作，从而组成完整有效的瞬态漏洞程序，
+我们需要通过总结分析各个代码块之间的协作约束关系，包括操作数关系、控制流关系等，
 设计出通用的代码组装模版，在确保瞬态漏洞程序有效运行的同时，尽可能多地覆盖各类瞬态漏洞场景。\par
 
 \textbf{程序的精简}。
@@ -674,7 +679,7 @@ inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ �
 
 \begin{figure}[htbp]
     \centering
-    \begin{minted}{json}
+    \begin{minted}{text}
         start_addr = 2147483648L;
         max_mem_size = 262144;
         memory_regions = (
@@ -1255,7 +1260,7 @@ delay 块一节的实验表明，瞬态窗口的大小一般在 24 条指令以�
 分支预测块由一些列 branch 块组成，主要影响 BIM 部件；函数调用返回块由一系列 call-return 指令组成，主要影响 RSB 部件（return stack buffer）；
 跳转块由一系列 jalr、jal 指令组成，主要影响 BTB 部件（branch target buffer）。因为跳转的目标对于部件的训练本身并不具有太强的参考意义，
 同时也为了可以让控制流块的指令都可以被执行，这里每条控制流指令的跳转目标都是下一条指令。因此 branch 指令和 jmp 用下一条指令的 label 作为跳转地址，
-对于 jalr、call、return 等指令（本质上都是 jalr 系列），使用$auipc t0, 0 和 mv ra, t0$将当前的 PC 写入寄存器 t0 和 ra，然后用这两个寄存器加
+对于 jalr、call、return 等指令（本质上都是 jalr 系列），使用 auipc t0, 0 和 mv ra, t0 将当前的 PC 写入寄存器 t0 和 ra，然后用这两个寄存器加
 偏移量作为跳转地址，调整偏移量使得跳转地址是下一条指令的地址即可。因为三个块基本不涉及 secret reg 的使用，因此只能被放在控制流类型的场景中。\par、
 
 \textbf{块的包裹：}
@@ -1561,54 +1566,54 @@ meltdown 异常延迟检测类型 6 类 51 个。其中通过训练触发的瞬�
 
 V1、V2、V4 收集到的瞬态窗口类型如表\ref{table:trans-summary}所示，这里我们对每种类型的机理进行简单介绍。\par
 
-\textbf{JALR+NONE 的组合}利用 jalr 指令的默认跳转目标预测。当 jalr 指令没有被训练时，
+\textbf{JALR+NONE}的组合利用 jalr 指令的默认跳转目标预测。当 jalr 指令没有被训练时，
 它在分支预测时查询对应的 btb 表，如果发现对应的 btb 表项正好为空，则默认选择跳转到 PC+4 的地址，
 顺序执行下一条指令打开瞬态窗口。但是鉴于真实执行时处理器的 btb 表项大概率都已经有值了，
 所以这个触发方式不容易发生。\par
 
-\textbf{JALR+RETURN/CALL/JALR 的组合}本质上是一样的，都是用 jalr 寄存器跳转指令训练寄存器跳转指令。
+\textbf{JALR+RETURN/CALL/JALR}的组合本质上是一样的，都是用 jalr 寄存器跳转指令训练寄存器跳转指令。
 jalr指令在执行之后会将跳转的目标地址保存到处理器前端的 btb（branch target buffer）组件中，
 然后在后续的 jalr 指令预测执行时会根据查找对应的 btb 表项得到预测的跳转地址，从而错误地进入瞬态窗口。
 该类型就是在训练时用 jalr 指令跳转进入瞬态窗口地址，将瞬态窗口地址写入 btb，
 使得 trigger 块的 jalr 错误的预测进入瞬态窗口。为了让训练的 jalr 指令和 trigger 块的 jalr
 共用 btb 表项，所以这里的 jalr 指令需要地址对齐。\par
 
-\textbf{JALR+JMP/BRANCH 的组合}也是用 jmp 指令和 branch 指令训练了 jalr 指令的 btb 表项，
+\textbf{JALR+JMP/BRANCH}的组合也是用 jmp 指令和 branch 指令训练了 jalr 指令的 btb 表项，
 但是 jmp 指令和 branch 指令的跳转地址本身其实不需要被预测，它们的跳转目标并不应该
 修改 btb 表项，这侧面反映了 BOOM 的 btb 更新策略存在过度更新的漏洞。\par
 
-\textbf{RETURN+CALL 的组合}通过训练处理器的 RSB（return stack buffer）触发瞬态窗口。
+\textbf{RETURN+CALL}的组合通过训练处理器的 RSB（return stack buffer）触发瞬态窗口。
 call 指令执行时会将 pc+4 缓存到 rsb 种作为之后 return 指令的返回地址。我们只需要让
 call 指令的下一条指令的地址是瞬态窗口的入口，return 指令预测执行的时候就会进入瞬态窗口。
 这里的 call 和 return 指令并不需要地址对齐也可以触发这个机制。\par
 
-\textbf{RETURN+JALR 的组合}利用了 return 指令本身也是 jalr 指令的特性进行工作。这说明了 return 指令
+\textbf{RETURN+JALR}的组合利用了 return 指令本身也是 jalr 指令的特性进行工作。这说明了 return 指令
 并不仅仅根据 rsb 进行跳转地址的预测，在条件合适的情况下也可以使用 btb 中的数据进行分支预测。\par
 
-\textbf{BRANCH+BRANCH\_TAKEN/BRANCH\_NOT\_TAKEN 的组合}利用了 branch 指令对 branch 指令的训练。
+\textbf{BRANCH+BRANCH\_TAKEN/BRANCH\_NOT\_TAKEN}的组合利用了 branch 指令对 branch 指令的训练。
 当 branch 指令执行完毕后，它的跳转与否会被提交到 bim 组件中，之后 branch 再次执行时会检查 bim 部件
 对应表项的跳转与否的预测，然后进行跳转。如果需要 branch 指令错误跳转进入瞬态窗口，
 需要用 branch 指令将 bim 表项训练为 taken；如果希望 branch 指令错误不跳转进入瞬态窗口，则
 需要用 branch 指令将 bim 表项训练为 not taken。为了让训练的 branch 和触发的 branch 共用一个 bim
 表项，需要让他们地址对齐。\par
 
-\textbf{BRANCH+NONE 的组合}，因为 bim 表项在完成 bim 的初始化之后都会被初始化为 10，所以
+\textbf{BRANCH+NONE}的组合，因为 bim 表项在完成 bim 的初始化之后都会被初始化为 10，所以
 即使不训练 branch 指令默认也是跳转的，所以如果需要错误预测跳转，不训练也可以触发。但是在
 真是的场景下，处理器的 BIM 状态是随机的，还是需要 branch 指令将状态调整到可控的状态。\par
 
-\textbf{STORE/LOAD + ACCESS\_FAULT/PAGE\_FAULT 的组合}利用了处理器的异常延时检测技术。
+\textbf{STORE/LOAD + ACCESS\_FAULT/PAGE\_FAULT}的组合利用了处理器的异常延时检测技术。
 这些指令不需要被训练，当处理器遇到这些指令时首先假设这些指令是满足权限的，然后后续的指令顺序执行。
 在得到内存地址之后才开始进行权限的检测，因为权限的检测涉及到走页表、检查pmp寄存器需要比较长的时候，
 所以当权限检测错误时又将长的窗口期可以触发瞬态执行漏洞。\par
 
-\textbf{STORE/LOAD\_MISALIGN + NONE 的组合}也利用了异常的演示检测。但是因为地址不对齐可以在得到内存地址之后
+\textbf{STORE/LOAD\_MISALIGN + NONE}的组合也利用了异常的演示检测。但是因为地址不对齐可以在得到内存地址之后
 立刻进行判断，所以虽然也可以触发瞬态窗口，但是窗口期太短，实际实验表明不足以支持后续的泄露秘密数据的操作。\par
 
-\textbf{V4+NONE 的组合}利用了内存载入部件 lsu 的预测错误。当进行内存访问时，后执行的 load 指令
+\textbf{V4+NONE}的组合利用了内存载入部件 lsu 的预测错误。当进行内存访问时，后执行的 load 指令
 假设之前发射的指令没有对需要访问的内存地址进行了修改，直接访问内存获得数据。但是之前发射的 store 指令
 在 load 之后修改了该地址的内存，导致 store 之后的指令被回滚，进而打开了瞬态窗口。该指令也不需要训练就可以触发。\par
 
-\textbf{V4+AMO/RETURN/STORE 的组合}，这是本实验发现的全新的训练组合，
+\textbf{V4+AMO/RETURN/STORE}的组合，这是本实验发现的全新的训练组合，
 在之前的研究中并没有提到 V4 类型需要被额外训练才可以生效，是本工作的全新发现，
 但是具体训练的机制未知，有待后续进一步的研究。\par
 
@@ -1617,25 +1622,25 @@ call 指令的下一条指令的地址是瞬态窗口的入口，return 指令�
     \caption{瞬态窗口统计} 
     \label{table:trans-summary}  
     \resizebox{1.0\linewidth}{!}{
-        \begin{tabular}{|l|l|l|l|} 
+        \begin{tabular}{|l|l|l|} 
             \hline
-            \textbf{瞬态窗口类别} & \textbf{预测部件} & \textbf{能否瞬态攻击} & \textbf{原理}\\
+            \textbf{瞬态窗口类别} & \textbf{预测部件} & \textbf{原理}\\
             \hline
-            JALR+NONE               &   btb &   是  &   btb 默认预测错误      \\
-            JALR+CALL/RETURN/JALR   &   btb &   是  &   jalr训练btb导致预测错误 \\
-            JALR+BRANCH/JMP         &   btb &   是  &   jmp/branch训练btb导致预测错误 \\
-            RETURN+CALL             &   rsb &   是  &   call训练rsb导致预测错误 \\
-            RETURN+JALR             &   btb &   是  &   jalr训练btb导致预测错误 \\
-            BRANCH+NONE             &   bim &   是  &   bim初始化值预测错误 \\
-            BRANCH+BRANCH           &   bim &   是  &   branch训练bim导致预测错误 \\
-            STORE\_PAGE\_FAULT      &   无  &   是  &   异常、权限延迟检测  \\
-            STORE\_ACCESS\_FAULT    &   无  &   是  &   异常、权限延迟检测  \\
-            STORE\_MISALIGN         &   无  &   否  &   异常、权限延迟检测  \\
-            LOAD\_PAGE\_FAULT       &   无  &   是  &   异常、权限延迟检测  \\
-            LOAD\_ACCESS\_FAULT     &   无  &   是  &   异常、权限延迟检测  \\
-            LOAD\_MISALIGN          &   无  &   否  &   异常、权限延迟检测  \\
-            V4                      &   lsu &   是  &   内存未修改预测错误  \\
-            V4+AMO/STORE/return     &   lsu &   是  &   未知               \\
+            JALR+NONE               &   btb &   btb 默认预测错误      \\
+            JALR+CALL/RETURN/JALR   &   btb &   jalr训练btb导致预测错误 \\
+            JALR+BRANCH/JMP         &   btb &   jmp/branch训练btb导致预测错误 \\
+            RETURN+CALL             &   rsb &   call训练rsb导致预测错误 \\
+            RETURN+JALR             &   btb &   jalr训练btb导致预测错误 \\
+            BRANCH+NONE             &   bim &   bim初始化值预测错误 \\
+            BRANCH+BRANCH           &   bim &   branch训练bim导致预测错误 \\
+            STORE\_PAGE\_FAULT      &   无  &   异常、权限延迟检测  \\
+            STORE\_ACCESS\_FAULT    &   无  &   异常、权限延迟检测  \\
+            STORE\_MISALIGN         &   无  &   异常、权限延迟检测  \\
+            LOAD\_PAGE\_FAULT       &   无  &   异常、权限延迟检测  \\
+            LOAD\_ACCESS\_FAULT     &   无  &   异常、权限延迟检测  \\
+            LOAD\_MISALIGN          &   无  &   异常、权限延迟检测  \\
+            V4                      &   lsu &   内存未修改预测错误  \\
+            V4+AMO/STORE/return     &   lsu &   未知               \\
             \hline
         \end{tabular}
     }
@@ -1646,5 +1651,154 @@ call 指令的下一条指令的地址是瞬态窗口的入口，return 指令�
 瞬态窗口，包含了 spectre v1-v4、ret-spectre、meltdown 类型的基本瞬态窗口类型，还发现了‘V4+AMO/STORE/return’的未知情况。
 充分证明了我们的生成框架在瞬态窗口的触发上有较高的生成效率和覆盖率。\par
 
-\subsection{完整 PoC 生成效率评估}
+\subsection{完整 PoC 生成评估}
 
+为了验证生成框架生成完整 PoC 的能力和效率，我们让测试框架连续执行完整的 stage1 和 stage2 测试。stage1 执行得到的代码会被
+送入 stage2 生成秘密访问和秘密泄露的代码，如果通过差分测试就会被保存起来。因为触发瞬态窗口和秘密泄露是相对独立的两部分代码，
+所以 stage1 得到的代码可以被反复用于 stage2 的代码生成，因此每得到一个 stage1 的代码就会被用于 20 次 stage2 代码的生成。
+如此我们让生成框架进行 4 小时的测试，然后分析总结得到的泄露秘密数据的类别和数目。为了可以和 SpecDoctor 的随机代码生成方法进行横向对比，
+我们采用和 SpecDoctor 一样的固定触发类型、泄露通道，再进行定向测试程序生成，将我们生成框架的漏洞触发时间和 SpecDoctor 进行横向比较。\par
+
+\subsubsection{泄露秘密数据效率评估}
+
+通过四个小时的测试，生成框架一共进行了 3599 次测试，找到了 166 个完整的 PoC，平均 21 次生成可以找到一个有效的 PoC。
+因为 PoC 的泄露机制比较繁琐驳杂，需要进行人工的一一审核，在这里无法对所有 166 个 PoC 的泄露机制进行分门别类，所以
+仅对一些有代表性的 PoC 泄露机制进行简要介绍，以佐证我们实验的真实性和完整性。\par
+
+\textbf{低位匹配泄露 secret 数据：}
+access\_secert 块在使用高位地址被随机数替换的地址进行内存访问，获得 secret 值时，仍然可以成功获得 secret。实验表明
+这首先需要 secert\_migrate 块将数据载入到 cache 或者 load buffer，然后因为 buffer 匹配时只使用地址的一部分（高位用于权限验证），
+所以仅当低位匹配时，access\_secert 块就可以从 cache 或者 load buffer 获得 secret 的值。在成功的 PoC 中高位替换的地址最多在
+替换了高 24 位之后依然可以有效匹配，所以 BOOM 的 buffer 使用的匹配地址最多不出超过 40 位。\par
+
+\textbf{通过 cache 侧信道泄露：}
+代码样例如图\ref{code:cache-channel}所示，其中 secret 数据被保存在 s0 寄存器中，本体的 secret 值为 101，变体的 secret 值为 0。
+当执行该代码时，本体访问地址 channel\_page\_base\_0 + 96 + 0x5c8 和 channel\_page\_base\_0 + 96 + 0x5e8 所在的内存，
+将这部分数据带入 cache；而变体将 channel\_page\_base\_0 + 0x5c8 和 channel\_page\_base\_0 + 0x5e8 的数据带入 cache。
+当 decode group 重新执行这部分代码是，因为 s0 的值在本体变体都是 101，所以访问地址  channel\_page\_base\_0 + 96 + 0x5c8 和 channel\_page\_base\_0 + 96 + 0x5e8 。
+因为本体可以在访问时命中 cache 所以执行速度比较快，但是变体因为 cache miss，执行速度比较慢，从而产生时间侧信道的差异，导致秘密的泄露。\par
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minted}{c}
+        la a1, channel_page_base_0
+        andi s0, s0, 0x7f8
+        add a1, a1, s0
+        flw ft3, 0x5c8(a1)
+        ld a7, 0x5e8(a1)
+    \end{minted}
+    \caption{用cache泄露秘密数据}
+    \label{code:cache-channel}
+\end{figure}
+
+\textbf{通过阻塞流水线：}
+代码样例如图\ref{code:port-stall}所示。因为变体的 s0 等于 0，而本体的等于 101，所以本体会执行这个循环的浮点指令，而变体不会。
+当瞬态窗口撤销时，本体发射的浮点指令还在 FPU 中执行无法直接从 FPU 中撤销，所以流水线必须等待 FPU 中的浮点指令执行完毕才可以
+回滚瞬态窗口，这就导致本体的流水线发生了临时的阻塞之后才可以继续执行，而变体可以直接回滚执行，所以变体比本体提前执行结束。
+所以通过阻塞流水线产生了时间差异，进而泄露了 secret 数据。\par
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minted}{c}
+        encode_block_0:
+            c.beqz s0, encode_nop_fill
+            fsgnj.d ft3, ft8, ft2
+            fmsub.d fs10, ft7, ft11, ft9
+            fmax.s ft10, fs6, fs6
+            fclass.d gp, fs8
+            fsub.s ft2, fs1, fs11
+            fcvt.d.wu fs1, a5
+            fsgnj.s fa3, ft5, ft1
+            jal zero, encode_block_0
+        encode_nop_fill:
+    \end{minted}
+    \caption{用阻塞流水线泄露秘密数据}
+    \label{code:port-stall}
+\end{figure}
+
+\textbf{通过BIM预测器：}
+代码样例如图\ref{code:bim-channel}所示。可以看到本体会执行分支中的 branch 指令，但是变体不会。
+当 branch 指令被执行时，bim 模块内部的状态被修改，之后 decode group 执行时本体因为预测的存在可以执行得更快，
+但是变体则相对较慢，从而泄露了秘密数据。但是 BOOM 承诺瞬态窗口执行的 branch 的预测结果是不会更新 bim 的，
+因此这也暗示了 bim 的更新逻辑存在 bug。\par
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minted}{c}
+            c.beqz s0, encode_nop_fill
+        encode_block_1:
+            bge s10, a7, encode_block_1_1
+        encode_block_1_1:
+            blt t0, s4, encode_block_1_2
+        encode_block_1_2:
+            bltu t0, sp, encode_block_1_3
+        encode_block_1_3:
+            beq s7, t3, encode_block_1_4
+        encode_block_1_4:
+            bge s11, s7, encode_block_1_5
+        encode_block_1_5:
+            bgeu a7, s6, encode_block_1_6
+        encode_nop_fill:
+    \end{minted}
+    \caption{用BIM泄露秘密数据}
+    \label{code:bim-channel}
+\end{figure}
+
+其他 PoC 也有利用 rsb、btb 等组件进行秘密数据泄露的，另外也包括一些原理不明的 PoC 程序有待后续的进一步分析归类。\par
+
+\subsubsection{SpecDoctor 的横向比较}
+
+这里我们固定了触发瞬态窗口的机制和泄露秘密数据的侧信道，进行定向的 PoC 生成，然后将我们找到第一个 PoC 所使用的时间
+和 SpecDoctor 论文使用的时间进行对比，通过横向比较衡量我们生成框架的性能。测试结果如表\ref{table:cmp-specdoctor}所示。
+可以看到 SpecDoctor 因为使用随机的指令生成方式，所以每个 PoC 生成所需的时间都是 10hour 级别的，
+而我们使用策略生成+地址敏感测试程序仅仅需要 1-3 min 就可以得到需要的 PoC，这也充分验证了我们生成策略的高效性。\par
+
+\begin{table}[h!]
+    \begin{center} 
+    \caption{与 SpecDoctor 的性能比较} 
+    \label{table:cmp-specdoctor}  
+    \resizebox{1.0\linewidth}{!}{
+        \begin{tabular}{|l|l|l|l|} 
+            \hline
+            \textbf{瞬态窗口类型} & \textbf{泄露通道} & \textbf{本框架用时} & \textbf{SpecDoctor 用时}\\
+            \hline
+            load\_page\_fault   &   dcache      &   2m24s   &   34.7h   \\
+            store\_page\_fault  &   dcache      &   1m9s    &   46.1h   \\
+            branch\_mispredict  &   dcache      &   2m31s   &   30.6h   \\
+            branch\_mispredict  &   front-end   &   2m31s   &   31.2h   \\
+            \hline
+        \end{tabular}
+    }
+    \end{center}
+\end{table}
+
+\section{不足与展望}
+
+虽然相比与现在的一些瞬态测试程序生成工作，本生成框架有更高的生成效率和覆盖率，但是仍有许多不足和改进的空间。
+
+\begin{enumerate}
+    \item 本生成框架暂不支持使用 csr 指令、rocc 指令、密码学扩展指令、fence 指令等进行训练，在指令的覆盖率上可以进一步扩展。
+后续可以考虑为处理器提供 rocc 部件和密码学计算部件，来增加这些指令的场景；对于 csr 指令的修改做一些调整和约束，确保在修改 csr
+指令的同时不会破坏程序的正常执行。\par
+    \item 本生成框架没有考虑瞬态窗口出现在异常处理程序的情况，故而控制流预测进入异常处理程序的情况会被测试程序忽略掉。
+当测试程序发生异常进入异常处理程序时，可能前端的控制流预测组件也会记录这些信息，从而在特定情况下预测进入异常处理程序。
+但是生成框架暂时没有对异常处理程序进行插桩和瞬态窗口填充的支持，因此暂时假定瞬态窗口不会在异常处理程序出现。\par
+    \item 本生成框架主要考虑的是前端控制流预测错误的情况，对于类似 V4 变体数据流预测错误的情况并没有很好的设计和覆盖。
+V4 启示我们并不仅仅只有控制流会发生预测，内存的访问、计算单元的计算结果都可能是预测产生的，因此我们既要考虑控制流预测的情况，
+也应该考虑数据流预测的情况，包括发生数据流预测错误如何设置瞬态窗口、如何防止秘密数据被显式访问等。\par
+    \item 本生成框架暂时不支持中断发生的情况。如果中断发生也可能对处理器的执行情况进行改变，进而影响处理器控制流的预测、微架构的编码
+等，对于瞬态窗口触发和秘密数据泄露也许都会有影响。因此需要提供通过监视处理器内部执行情况触发外部中断的机制，让中断在合适的时机发生。\par
+    \item 本生成框架在瞬态漏洞定位方面存在不足。虽然生成框架可以产生 PoC，但是 encode 块内部的代码过于繁多和驳杂，依靠手动定位和
+分析过于费时费力，所以需要一个简单有效的机制过滤掉 encode 块中的冗余代码，将搜索空间变得尽可能小，进而提高漏洞定位的效率。\par
+    \item 本生成框架仅在 BOOM 处理器上进行测试验证，对于 xiangshan 等其他乱序处理器、大型商用处理器都没有进行验证考量，
+其生成功能的通用性、泛化性还有待更多实验的验证。\par
+\end{enumerate}
+
+\section{总结}
+
+本文提出了一种适用于 RISCV 处理器的瞬态执行漏洞发掘的高效测试程序生成框架。
+该框架可以支持物理态、内核态、用户态的执行，支持虚拟地址和物理地址的执行，支持 rv64imafdc 的全集和 zicsr 扩展的子集。
+为了解决现有瞬态执行漏洞测试生成框架随机生成的低效性问题，我们采用操作数约束执行、代码块策略生成、
+地址敏感的训练代码和泄露代码排布、物理内存切换等技术进行解决。该生成测试框架可以在 4 小时内找到 166 个 BOOM 处理器的完整 PoC，
+覆盖 15 种瞬态窗口类型和至少 5 种侧信道，对于给定的窗口类型和侧信道类型可以在 min 的时间量级内找到 PoC，远快于 SpecDoctor 等
+随机生成框架的 hour 级别。\par
