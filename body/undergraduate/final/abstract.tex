@@ -3,20 +3,24 @@
     \bfseries \zihao{3} 摘~要
 \end{center}
 
-随着侧信道攻击技术的发展，瞬态攻击漏洞已经成为现代处理器安全的关键问题。
-虽然近年来一些基于 RISCV 体系结构的瞬态执行漏洞挖掘工作已经取得了出色的成果，
-但是因为瞬态执行漏洞的复杂性，瞬态执行漏洞测试程序自动化生成仍然十分困难。
-目前的生成框架普遍存在程序数据流、控制流约束弱，瞬态窗口触发效率低下，代码块随机堆砌、难以协同工作等问题。
-因此如何自动化地高效生成兼具有效性和多样性的瞬态执行漏洞测试程序，仍然是该领域亟待解决的重要课题。\par
+随着大量复杂投机执行技术的引入和侧信道攻击技术的发展，瞬态执行漏洞已经成为现代处理器安全的关键问题。
+近年来一些基于 RISCV 体系结构的瞬态执行漏洞挖掘工作已经取得了出色的成果，并成功找到了处理器中真实存在的瞬态执行漏洞。
+但是因为瞬态执行漏洞本身语义和执行流程的复杂性，使得针对瞬态执行漏洞测试程序自动化生成变得十分困难。
+目前的生成框架多存在指令约束能力弱，瞬态窗口触发效率低下，代码块之间难以协同工作等问题。
+因此如何自动化地高效生成兼具有效性和多样性的瞬态执行漏洞测试程序，仍然是瞬态漏洞模糊测试领域亟待解决的重要课题。\par
 
 本文提出的针对 RISCV 处理器的瞬态执行漏洞高效测试程序生成框架对上述三个问题进行了解决。
-首先我们针对瞬态执行的场景设计了控制流、数据流的约束条件，并引入具体值求解技术。
-为解决瞬态窗口触发效率问题，我们为预设的瞬态窗口触发指令构造训练代码，
-并引入硬件可切换内存单元解决训练代码地址对齐问题。为解决代码块协同工作问题，
-我们将瞬态执行的主体代码进行分块策略生成，并有序组装成完整程序。
-该生成框架，最终可以支持M、S、U态的测试程序执行，支持虚拟地址和物理地址的执行，
-支持 rv64imafdc 的全集和 zicsr 扩展的子集，可以在 4 小时内覆盖 BOOM 处理器
- 15 种瞬态窗口类型和至少 5 种侧信道。\par
+为了增强生成框架的指令约束能力，我们针对瞬态执行的场景设计了控制流、数据流的约束条件，
+通过修改开源指令约束求解器 razzle 进行指令约束求解，并通过修改 spike 模拟器引入具体值求解技术。
+为解决瞬态窗口触发效率问题，我们对于预设的瞬态窗口地址和触发瞬态窗口的指令有针对性地生成训练代码，
+并引入硬件可切换内存单元，通过训练代码和被训练代码共用物理地址的方式提高训练效果。
+为解决代码块协同工作问题，我们将瞬态执行的主体代码根据功能和语义细分为十个功能块，
+对每个功能块进行定制化的策略生成，并将各代码部分有序组装成满足约束的完整程序。\par
+
+我们的瞬态执行漏洞测试程序生成框架最终可以支持物理态、内核态、用户态的测试程序执行，支持虚拟地址和物理地址的执行，
+支持 rv64imafdc 的全集和 zicsr 扩展的子集。该生成测试框架可以在 4 小时内找到 166 个 BOOM 处理器的完整 PoC，
+覆盖至少 15 种瞬态窗口类型和至少 5 种侧信道，对于给定的窗口类型和侧信道类型可以在 min 的时间量级内找到 PoC，远快于 SpecDoctor 等
+随机生成框架。\par
 
 \textbf{关键词：}RISC-V；处理器测试；瞬态执行漏洞；测试程序生成
 
@@ -25,34 +29,44 @@
     \bfseries \zihao{3} Abstract
 \end{center}
 
-With the development of side-channel attack techniques, 
-transient execution vulnerabilities have become a critical vulnerability
+With the development of complex speculative execution technologies 
+and side-channel attack techniques, transient execution vulnerabilities have become a critical vulnerability
 in modern processor security. In recent years, 
 some research on RISC-V architecture-based transient execution vulnerability detection 
-has achieved excellent results,
-but, due to the complexity of transient execution vulnerabilities, 
-it is still extremely difficult to automatically generate testing programs for transient execution vulnerabilities.
+has achieved excellent results and identified real-world transient execution vulnerabilities in processors successfully.
+However, due to the complexity of transient execution vulnerabilities, 
+it is extremely difficult to automatically generate testing programs for transient execution vulnerabilities.
 Current generation frameworks often suffer from weaknesses 
-such as data flow and control flow constraints, 
+such as instruction constraints, 
 low trigger efficiency, difficulties in collaborative work among code blocks. 
-Therefore, how to generate effective and diverse transient execution vulnerability testing programs 
-efficiently and automatically remains a crucial unsolved problem in this field.\par
+Therefore, how to generate effective and diverse transient execution vulnerability testing programs  efficiently and automatically 
+remains a crucial unsolved problem in the field of transient vulnerability fuzz testing.\par
 
-This work proposes an efficient testing program generation framework for RISCV processors' transient execution vulnerabilities
-to solve three existing problems mentioned.
-Firstly, we designed scenario-based constraint conditions for control flow and data flow of transient executions, 
-and introduced concrete value-solving techniques.
-To solve the issue of low trigger efficiency for transient windows, 
-we constructed training code for preset transient window trigger instructions 
-and introduced hardware-switchable memory units 
-to resolve the training code's address alignment issues.
-To solve the problem of collaborative work among code blocks, 
-we employed a block-based strategy to generate the main body of transient execution code 
-and assembled it into a complete program in an orderly manner.
-This generation framework ultimately supports testing programs executed in M, S, U modes, 
-as well as virtual and physical address. 
+This work proposes a high-efficiency test program generation framework
+to address the above three problems for transient execution vulnerability on RISC-V processors.
+To enhance the instruction-level parallelism ability of the generation framework, 
+we designed constraint conditions for control flow and data flow specifically tailored for transient execution scenarios. 
+We modified open-source instruction-level parallelism solver razzle to perform instruction-level parallelism solving, 
+and solved concrete value solving technology by modifying spike simulator.
+To solve the transient window triggering efficiency problem,
+we generated targeted training code for predefined transient window addresses and instructions 
+that trigger transient windows. 
+And we introduced a hardware-switchable memory unit, 
+which improves training effectiveness by sharing physical addresses between training code and trained code.
+To solve the code block collaboration problem, 
+we divided the main body of transient execution code into ten functional blocks based on functionality and semantics. 
+We generated customized strategies for each functional block, 
+and assembled various code parts in a sequential manner 
+to form a complete program that satisfies constraints.\par
+
+Our program generation framework of transient execution vulnerabilities 
+ultimately supports testing programs executed in physical, kernel, and user modes, 
+as well as virtual and physical address executions. 
 It also supports the full set of rv64imafdc instructions and a subset of zicsr extensions. 
-It can cover 15 types of transient windows and at least 5 types of side channels of BOOM processors within 4 hours.\par
+This testing framework can find 166 complete PoCs for BOOM processors within 4 hours, 
+covering at least 15 types of transient windows and at least 5 types of side channels. 
+For given window types and side channel types, it can find PoCs in minimal time scales, 
+significantly outperforming random generation frameworks like SpecDoctor.\par
 
 \textbf{Keywords:}RISC-V;processor test;transient execution vulnerability;testing program generation
 
