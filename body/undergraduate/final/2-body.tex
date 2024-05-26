@@ -587,62 +587,9 @@ starship 通过集成一系列开源的 RISCV 软硬件工具，实现自动化�
 其中瞬态窗口触发事件的发生被用于阶段1的判断，程序执行结束的时间被用于阶段2差分测试的判断。
 12 种 label 指令分别代表一类事件，根据 label 是进入 rob 还是从 rob 中提交可以分为 ENQ 和 DEQ 两种子事件，所以一共有 24 种事件。\par
 
-rob 插桩和事件 log 记录的代码，如图\ref{code:rob-stub}所示。首先创建一个 taint.log 文件，
-然后将监控到的事件信息 dump 到这个 log 文件中，
-最后实例化两个 event\_handler 函数调用对 rob 的进入和提交进行周期性检测，
-一个负责根据进入 rob 的指令类型记录 ENQ 事件发生；一个负责根据 rob 提交的指令类型记录 DEQ 事件发生。
-
-\begin{figure}[htbp]
-    \centering
-    \begin{minted}{Verilog}
-
-    initial begin
-        $timeformat(-9, 0, "", 20);
-        $value$plusargs("taintlog=%s", taintlog);
-        event_fd = $fopen({`TOP_DIR, "/wave/", taintlog, ".taint.log"}, "w");
-    end
-
-    always @(posedge clock) begin
-        if (!reset) begin
-            event_handler(`DUT_ROB_ENQ_EN_0, `DUT_ROB_ENQ_INST_0, "ENQ", 0, `IS_DUT);
-            event_handler(`DUT_ROB_DEQ_EN_0, `DUT_ROB_DEQ_INST_0, "DEQ", 0, `IS_DUT);
-        end
-    end
-
-    \end{minted}
-    \caption{rob插桩}
-    \label{code:rob-stub}
-\end{figure}
-
-核心函数 event\_handler 如图\ref{code:event-handler}所示，
-该函数记录 rob 检测到的事件。它接收五个参数，其中 valid 表示当前指令进入或者离开 rob，
-inst 为当前指令的编码，suffix 为当前指令的子事件类别（ENQ 表示进入 rob、DEQ 表示从 rob 中提交）。
-当 valid=1 时，event\_handler 函数根据 inst 和 suffix 的内容将不同的事件 log 信息保存到 taint.log 文件中，
+首先创建一个记录时间信息的 taint.log 文件，然后实例化两个 event\_handler 函数，
+根据指令编码分别对指令进入 rob 的 ENQ 事件和 rob 提交指令的 DEQ 事件进行记录，
 包括事件名称（如 TEXE\_START\_ENQ、TEXE\_END\_DEQ）和当前处理器 cycle 数。
-
-\begin{figure}[htbp]
-    \centering
-    \begin{minted}{Verilog}
-
-    function void event_handler;
-        input valid;
-        input [31:0] inst;
-        input string suffix;
-        input int id;
-        input int is_dut;
-
-        if (valid) begin
-            case (inst)
-                `INFO_VCTM_START: $fwrite(event_fd, "%t, VCTM_START_%s, %d, %d\n", $time, suffix, id, is_dut);
-                `INFO_VCTM_END: $fwrite(event_fd, "%t, VCTM_END_%s, %d, %d\n", $time, suffix, id, is_dut);
-                ...
-            endcase
-        end
-    endfunction
-    \end{minted}
-    \caption{event\_handler函数}
-    \label{code:event-handler}
-\end{figure}
 
 \subsubsection{程序退出和打印}
 为了在测试程序执行完毕后，结束处理器运行，退出仿真，我们需要为处理器增加终止仿真执行的软件接口；
