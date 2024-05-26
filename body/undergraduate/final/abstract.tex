@@ -5,11 +5,11 @@
 
 随着大量复杂投机执行技术的引入和侧信道攻击技术的发展，瞬态执行漏洞已经成为现代处理器安全的关键问题。
 近年来一些基于 RISCV 体系结构的瞬态执行漏洞挖掘工作已经取得了出色的成果，并成功找到了处理器中真实存在的瞬态执行漏洞。
-但是因为瞬态执行漏洞本身语义和执行流程的复杂性，使得针对瞬态执行漏洞测试程序自动化生成变得十分困难。
+但是因为瞬态执行漏洞本身语义和执行流程的复杂性，使得瞬态执行漏洞测试程序的自动化生成变得十分困难。
 目前的生成框架多存在指令约束能力弱，瞬态窗口触发效率低下，代码块之间难以协同工作等问题。
 因此如何自动化地高效生成兼具有效性和多样性的瞬态执行漏洞测试程序，仍然是瞬态漏洞模糊测试领域亟待解决的重要课题。\par
 
-本文提出的针对 RISCV 处理器的瞬态执行漏洞高效测试程序生成框架对上述三个问题进行了解决。
+本文提出的适用于 RISCV 处理器的瞬态执行漏洞测试程序生成框架对上述三个问题进行了解决。
 为了增强生成框架的指令约束能力，我们针对瞬态执行的场景设计了控制流、数据流的约束条件，
 通过修改开源指令约束求解器 razzle 进行指令约束求解，并通过修改 spike 模拟器引入具体值求解技术。
 为解决瞬态窗口触发效率问题，我们对预设的瞬态窗口地址和触发瞬态窗口的指令有针对性地生成训练代码，
@@ -19,7 +19,7 @@
 
 我们的瞬态执行漏洞测试程序生成框架最终可以支持物理态、内核态、用户态的测试程序执行，支持虚拟地址和物理地址的执行，
 支持 rv64imafdc 的全集和 zicsr 扩展的子集。该生成测试框架可以在 4 小时内找到 166 个 BOOM 处理器的完整 PoC，
-覆盖至少 15 种瞬态窗口类型和至少 5 种侧信道，对于给定的窗口类型和侧信道类型可以在 min 的时间量级内找到 PoC，远快于 SpecDoctor 等
+覆盖至少 15 种瞬态窗口类型和至少 2 种侧信道，对于给定的窗口类型和侧信道类型可以在 min 的时间量级内找到 PoC，远快于 SpecDoctor 等
 随机生成框架。\par
 
 \textbf{关键词：}RISC-V；处理器测试；瞬态执行漏洞；测试程序生成
@@ -64,7 +64,7 @@ ultimately supports testing programs executed in physical, kernel, and user mode
 as well as virtual and physical address executions. 
 It also supports the full set of rv64imafdc instructions and a subset of zicsr extensions. 
 This testing framework can find 166 complete PoCs for BOOM processors within 4 hours, 
-covering at least 15 types of transient windows and at least 5 types of side channels. 
+covering at least 15 types of transient windows and at least 2 types of side channels. 
 For given window types and side channel types, it can find PoCs in minimal time scales, 
 significantly outperforming random generation frameworks like SpecDoctor.\par
 
