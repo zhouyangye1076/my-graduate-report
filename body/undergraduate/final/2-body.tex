@@ -1363,8 +1363,8 @@ V1、V2、V3 收集到的瞬态窗口类型如表\ref{table:trans-summary}所示
             JALR+TAKEN/NOT\_TAKEN/JMP&   BTB &   jmp/branch训练BTB导致预测错误 \\
             RETURN+CALL             &   RSB &   call训练RSB导致预测错误 \\
             RETURN+JALR             &   BTB &   jalr训练BTB导致预测错误 \\
-            BRANCH+NONE             &   BIM &   bim初始化值预测错误 \\
-            BRANCH+BRANCH           &   BIM &   branch训练bim导致预测错误 \\
+            BRANCH+NONE             &   BIM &   BIM初始化值预测错误 \\
+            BRANCH+BRANCH           &   BIM &   branch训练BIM导致预测错误 \\
             STORE\_PAGE\_FAULT      &   无  &   异常、权限延迟检测  \\
             STORE\_ACCESS\_FAULT    &   无  &   异常、权限延迟检测  \\
             STORE\_MISALIGN         &   无  &   异常、权限延迟检测  \\
@@ -1493,7 +1493,7 @@ access\_secert 块在使用高位地址被随机数替换的地址进行内存�
     \label{code:port-stall}
 \end{figure}
 
-另外也包括一些原理不明的 PoC 程序有待后续进一步地分析归类，诸如 RSB、BTB、bim 等前端部件也有可能被作为侧信道。
+另外也包括一些原理不明的 PoC 程序有待后续进一步地分析归类，诸如 RSB、BTB、BIM 等前端部件也有可能被作为侧信道。
 故而我们的 PoC 至少覆盖了 cache、port 两种侧信道。\par
 
 \subsubsection{SpecDoctor 的横向比较}
