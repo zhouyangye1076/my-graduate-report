@@ -587,7 +587,7 @@ starship 通过集成一系列开源的 RISCV 软硬件工具，实现自动化�
 其中瞬态窗口触发事件的发生被用于阶段1的判断，程序执行结束的时间被用于阶段2差分测试的判断。
 12 种 label 指令分别代表一类事件，根据 label 是进入 rob 还是从 rob 中提交可以分为 ENQ 和 DEQ 两种子事件，所以一共有 24 种事件。\par
 
-首先创建一个记录时间信息的 taint.log 文件，然后实例化两个 event\_handler 函数，
+首先创建一个记录事件信息的 taint.log 文件，然后实例化两个 event\_handler 函数，
 根据指令编码分别对指令进入 rob 的 ENQ 事件和 rob 提交指令的 DEQ 事件进行记录，
 包括事件名称（如 TEXE\_START\_ENQ、TEXE\_END\_DEQ）和当前处理器 cycle 数。
 
