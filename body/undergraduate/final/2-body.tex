@@ -10,7 +10,7 @@
 
 RISC-V 指令集架构（ISA）是一种开源的精简指令集架构\cite{riscv-isa-manual-all}。
 它由一个基本的整数指令集和一组可选的指令集扩展组成。
-标准扩展包含整数乘除法扩展（M）、内存原子操作扩展（A）、单精度浮点扩展（F）、双精度浮点扩展（D）和压缩指令扩展（C），等。
+标准扩展包含整数乘除法扩展（M）、内存原子操作扩展（A）、单精度浮点扩展（F）、双精度浮点扩展（D）和压缩指令扩展（C）等。
 此外，控制和状态寄存器指令扩展（ZICSR）提供特权态管理功能， 而屏障指令扩展（ZIFENCEI）提供指令内存同步功能。\par
 
 RISC-V 指令分为 32 位常规指令（包含六种指令格式）和 16 位压缩指令（包含九种指令格式）两种。 
@@ -35,7 +35,7 @@ RISC-V 指令分为 32 位常规指令（包含六种指令格式）和 16 位�
     \item 操作码相关字段，如 funct 和 opcode 字段。
 opcode 字段和 op 字段的低 2 位用于确定指令的长度，而 funct 字段和 opcode 字段的其它位用于确定指令格式和功能。
 通常，具有相似功能的指令有相同的 opcode 字段，并通过 funct 字段来区分具体功能。\par
-    \item 操作数相关的字段，包括 imm，rs 和 rd 字段。
+    \item 操作数相关的字段，包括 imm、rs 和 rd 字段。
 其中 rs 字段用于选择源寄存器，imm 字段用于表示立即数，rd 字段用于选择目的寄存器，即写回指令结果的寄存器。\par
 \end{enumerate}
 
@@ -122,7 +122,7 @@ opcode 字段和 op 字段的低 2 位用于确定指令的长度，而 funct �
 本章节将从这三个方面对研究方向和研究进展进行介绍。
 
 \subsubsection{输入生成}
-输入生成阶段负责生成瞬态执行漏洞测试程序。\
+输入生成阶段负责生成瞬态执行漏洞测试程序。
 早期的硬件模糊测试工具如 DifuzzRTL\cite{hur2021difuzzrtl}、
 TheHuzz\cite{kande2022thehuzz}等基本采用纯随机的方式进行测试指令生成，
 处理器漏洞挖掘效率相对较低。为了进一步提高测试程序的质量，Razzle\cite{razzle}、
@@ -142,7 +142,7 @@ SpecDoctor\cite{hur2022specdoctor}等工作对指令的数据流进行了约束�
 早期的工作会直接使用真实的处理器硬件执行测试程序，但是随着RTL漏洞检测重要性的提高，
 基于RTL仿真的瞬态漏洞测试执行工作，如IntroSpectre\cite{ghaniyoun2021introspectre}、
 SpecDoctor\cite{hur2022specdoctor}等开始兴起。
-Verilator\cite{snyder2013verilator}等开源工具为RTL仿真提供了条件，
+verilator\cite{snyder2013verilator}等开源工具为RTL仿真提供了条件，
 且在仿真的场景下还可以进行硬件插桩，便于后续阶段的漏洞检测。\par
 
 但为了提高测试执行的效率，一些工作如Revixor\cite{oleksenko2022revizor}、
@@ -166,7 +166,7 @@ IntroSpectre\cite{ghaniyoun2021introspectre}通过检查缓冲区执行前后的
 SpeechMiner\cite{xiao2019speechminer}通过测量竞争条件判断漏洞的可用性。\par
 
 差分测试和约束判断的漏洞检测方法有时还需要硬件插桩的辅助。
-如果拥有 RTL 源码，就可以通过 RTL 硬件插桩的方法为检测程序得到处理器内部的状态信息和事件信息，
+如果拥有 RTL 源码，就可以通过 RTL 硬件插桩的方法为检测程序提供处理器内部的状态信息和事件信息，
 甚至可以在处理器内存内嵌约束判断的电路逻辑，在测试执行的同时直接进行漏洞约束的判断。
 
 \cleardoublepage
@@ -194,7 +194,7 @@ SpeechMiner\cite{xiao2019speechminer}通过测量竞争条件判断漏洞的可�
 
 \textbf{约束指令字段}。
 为了触发一些预设的特殊场景，生成框架也需要对生成指令的字段进行约束。
-例如为了增加指令间的数据流依赖，触发更复杂的流水线执行情况，需要对指令间的 rs、rd 等字段进行约束；
+例如为了增加指令间的数据流依赖、触发更复杂的流水线执行情况，需要对指令间的 rs、rd 等字段进行约束；
 为了可以跳转到特定的地址、访问特殊的内存，需要对指令和数据的 label 等进行约束。\par
 
 \subsection{瞬态窗口训练的生成}
@@ -211,7 +211,7 @@ SpecDoctor\cite{hur2022specdoctor}都是用随机代码生成的方式进行瞬�
 在多数情况下，训练指令只有在特殊的地址上才可以对 trigger 指令对应的微架构状态进行有效训练 。
 例如对于 boom 处理器\cite{celio2017boomv2}的 branch 指令，
 低地址对齐的控制流指令可以对该 trigger 对应的分支预测器表项进行有效训练，
-从而将 branch 指令涉及的微架构调整到位。
+从而将 branch 指令涉及的微架构状态调整到位。
 为此，生成框架在生成训练代码的时候需要寻找合适的指令排布位置，
 从而提高训练的成功率。 \par
 
@@ -267,7 +267,7 @@ delay 块在 load\_init 块初始化之后执行，它由一系列强数据流�
 trigger 块负责触发瞬态窗口，紧接着 delay 块开始执行。为了延迟得到 trigger 指令的执行结果，
 迫使处理器执行预测执行，trigger 指令的操作数依赖于 delay 块的计算结果。
 此外，为了可以让 trigger 指令可以访问特殊的地址触发异常、或者跳转到非瞬态窗口的地址，生成框架会对 trigger 指令的操作数值进行约束，
-确保地址访问或者地址跳转符合预期。\par
+确保地址访问或者控制流跳转符合预期。\par
 \textbf{瞬态窗口块（trans块）：}
 trans 块包含一个确保可以侧信道泄露秘密数据的默认指令序列，用于填充预设的待触发的瞬态窗口区域，
 如果该部分的代码被瞬态执行，则预示着瞬态窗口被触发成功。\par
@@ -280,8 +280,8 @@ trans 块暂时填充阶段2用于秘密数据泄露的代码区域，因此属�
 
 首先执行 init 块，然后顺序排布和执行 load\_init 块、nop块、delay 块、trigger 块。
 根据 trigger 指令的指令类别，决定后续排布的 return 块和 trans 块的顺序。trap 块位于其他位置，在异常发生时进入。
-最后 return 块、trans 块、trap 块都会跳转进入 exit 块结束硬件模拟程序。
-场景一的排布可以满足控制流跳转、异常触发和 spectre-v4 等 trigger 类型的执行需求；
+最后 return 块、trans 块、trap 块都会跳转进入 exit 块，结束硬件模拟。
+场景一的排布可以满足控制流跳转、异常触发和 spectre-V4 等 trigger 类型的执行需求；
 场景二的排布可以满足控制流不跳转、非跳转指令等 trigger 类型的执行需求。
 这里的 load\_init 块、delay 块、trigger 块、nop 块、
 trans 块、return 块组成了一个完整的指令组合，我们称之为 victim group。\par
@@ -310,7 +310,7 @@ return 块、nop\_return 块等代码块，配合 train 块工作。\par
 生成框架会用上述代码生成与 victim group 地址布局对应的训练代码，我们称之为 train group。
 有时候一个 train group 并不能有效训练 victim group，因此生成框架会依概率为 victim group
 生成一系列 train group，依次执行，来提高成功训练 trigger 指令的可能性。
-如图\ref{paper:memory-switch}，当执行测试程序时，
+如图\ref{paper:memory-switch}所示，当执行测试程序时，
 首先执行第一个 train group 的指令序列，然后返回到物理内存切换的指令部分，
 执行物理内存切换。物理内存中的指令切换为下一个 train group，继续训练，直到最后切换为
 被训练的 victim group，开始尝试触发瞬态窗口。\par
@@ -392,14 +392,14 @@ migrate\_secret 块负责改变 secret 数据在分层存储结构中的位置�
     \label{paper:access-secret}
 \end{figure}
 
-如图\ref{paper:access-secret}，
+如图\ref{paper:access-secret}所示，
 这两部分代码在阶段2会被组装进入 victim group。对于 access\_secret 块，
 因为访问秘密数据的过程只能在瞬态执行的过程中进行，
 因此 access\_secret 块的代码需要被布局在 trans 块的内部；
 而对于 migrate\_secret 块，这部分代码虽然可以在瞬态窗口外部被执行，
 但是在执行了 migrate\_secret 块的指令之后应该尽可能地避免内存访问指令的执行，
-以防破坏 secret 在内存结构中的位置，因此这部分代码被放置在 load\_init 块之后，delay 块之前。
-故而阶段2将原先的 victim group 调整为如图\ref{paper:access-secret}的布局。\par
+以防破坏 secret 在内存结构中的位置，因此这部分代码被放置在 load\_init 块之后、delay 块之前。
+故而阶段2将原先的 victim group 调整为如图\ref{paper:access-secret}所示的布局。\par
 
 当 victim group 的代码被执行时，程序在执行完 load\_init 块的寄存器初始化之后，
 就会执行 secret\_migrate 块的代码,将秘密数据迁移到处理器存储结构的合适位置，然后执行后续代码触发瞬态窗口。
@@ -551,7 +551,7 @@ starship 通过集成一系列开源的 RISCV 软硬件工具，实现自动化�
 \end{table}
 
 \textbf{内存切换单元：}
-为了提高物理内存切换的效率，我们实现了可切换内存单元用于各个 group 的快速切换。
+为了提高物理内存切换的效率，我们实现了可切换内存单元，用于各个 group 的快速切换。
 该物理内存使用 DPI-C 接口调用 cpp 程序实现，函数接口如图\ref{code:swappable-memory}所示。
 
 \begin{figure}[htbp]
@@ -570,7 +570,7 @@ starship 通过集成一系列开源的 RISCV 软硬件工具，实现自动化�
     \item 内存初始化：生成框架会将各个 group 和其余框架部分打包为若干二进制文件和一个 libconfig 格式的 config 文件。
 可切换内存单元调用 initial\_mem 函数，根据 config 文件的指示将二进制文件载入对应的内存区域。
 其中框架部分的二进制会被物理地址直接映射，而 group 的二进制需要在执行内存切换后才会依次被物理地址映射。\par
-    \item 内存读写操作：内存单元的读操作调用 read\_byte、write\_byte 函数执行，
+    \item 内存读写操作：内存单元的读写操作调用 read\_byte、write\_byte 函数执行，
 找到可切换内存单元中对应的字节，然后进行读写操作。\par
     \item 内存切换操作：内存单元的切换操作通过 do\_mem\_swap 函数执行。
 根据 config 文件中的切换顺序，解除上一个 group 的二进制和物理地址的映射关系，
@@ -600,8 +600,9 @@ victim group、decode group，然后执行 exit 块的代码退出。为了简�
 
 \subsection{框架组件生成}
 
-为了生成可以执行的程序，生成框架不但要生成用于触发瞬态窗口和侧信道泄露秘密数据的 PoC 代码，
-还需要额外生成一些框架代码，用于支持 PoC 代码的执行和生效。本章节将对这些框架相关的代码部分、数据部分、其他机制进行罗列和详细介绍。\par
+生成框架不但要生成用于触发瞬态窗口和侧信道泄露秘密数据的 PoC 代码，
+还需要额外生成一些框架代码，用于支持 PoC 代码的执行和生效。
+本章节将对这些框架相关的代码部分、数据部分、其他机制进行罗列和详细介绍。\par
 
 \subsubsection{框架代码块和框架数据块}
 本章节将对框架相关的代码部分、数据部分进行罗列和详细介绍。
@@ -610,9 +611,9 @@ victim group、decode group，然后执行 exit 块的代码退出。为了简�
 init 块用于对所有 GPR、FPR、CSR、PC 和特权级进行初始化。为了对寄存器，特别是特权寄存器进行 field 粒度的属性设置，
 本工作实现了 snapshot 子模块。该模块会读入一个 reg\_init.hjson，这个文件记录了通用寄存器 GPR、浮点寄存器 FPR、
 M态和S态的基本特权寄存器 field 粒度的属性值，然后拼接 CSR 的各个 field 得到 CSR 的初始值，并生成寄存器初始化的汇编代码。
-该汇编代码将所有 CSR、FPR、GPR 的初始化值存储为一个 64 位数据的数组，然后依次读取数据的值来初始化 CSR、FPR、GPR 的值。
-生成框架的 InitManager 负责修改 reg\_init.hjson 各个字段的值，为每个特权寄存器提供满足测试程序要求的值，
-并调用 snapshot 模块得到对应的初始化程序。例如 mtvec 和 stvec 需要设置为 trap 块的入口地址，satp 设置为页表基地址，
+该汇编代码将所有 CSR、FPR、GPR 的初始化值存储为一个 64 位数据的数组，然后依次读取数组的值来初始化 CSR、FPR、GPR。
+生成框架的 InitManager 负责修改 reg\_init.hjson 各个字段，为每个特权寄存器提供满足测试程序要求的值，
+并调用 snapshot 模块生成对应的初始化程序。例如 mtvec 和 stvec 需要设置为 trap 块的入口地址，satp 设置为页表基地址，
 mstatus 的 pmie 设置为程序执行所需要的特权级，mepc 设置为后续程序执行的入口地址，然后在 init 块末尾执行 mret，
 进入后续测试程序的入口，并自动设置程序执行时的特权级。\par
 
@@ -630,7 +631,7 @@ exit 块被用于测试程序的退出。
 
 \textbf{秘密数据块（secret 块）：}
 secret 块用于存放秘密数据，是瞬态漏洞执行程序泄漏的目标。secret 被初始化为一些魔数，并且生成框架确保测试程序只会在
- access\_secret 块和 secret\_migrate 块中访问 secret 数据，确保程序不在其他位置显式或者瞬态访问 secret 数据。
+ access\_secret 块和 secret\_migrate 块中访问 secret 数据，确保程序不在其他位置直接或者瞬态访问 secret 数据。
 当执行差分测试时，变体测试程序会将 secret 部分替换为全 0，然后进行后续的差分测试。\par
 
 \textbf{信道数据块（channel 块）：}
@@ -675,7 +676,7 @@ data\_decode 块用于存放 decode group 需要使用的数据，例如 decode 
 0xfffxxxxx。\par
 
 测试程序各个 section 的虚拟地址范围、物理地址范围和权限，各个 section 的代码块、
-数据块组成参见表\ref{table:section-dist}、\ref{table:group-dist}。
+数据块组成如表\ref{table:section-dist}、\ref{table:group-dist}所示。
 
 \begin{table}[h!]
     \begin{center} 
@@ -742,7 +743,7 @@ data\_decode 块用于存放 decode group 需要使用的数据，例如 decode 
 
 \subsubsection{瞬态窗口触发部分}
 
-瞬态触发相关的重要代码块包括 train group 的训练块（train 块）和trigger group 的触发块（trigger 块）、
+瞬态窗口触发部分的重要代码块包括 train group 的训练块（train 块）和trigger group 的触发块（trigger 块）、
 延迟块（delay 块）。我们依次对每个块的生成策略进行介绍。\par
 
 \textbf{延迟块（delay块）:}\par
@@ -752,12 +753,12 @@ delay 块的目的在于让后续的 trigger 块延迟获得操作数结果，�
 以确保指令的计算开销可以不断累加起来。\par
 
 为了检验哪些类型的指令组合可以产生较长时间的延迟，进而打开足够大的瞬态窗口，我们进行了如下实验：该实验用浮点指令组合和整型指令组合
-充当 delay 块，相邻指令之间有数据依赖，用分支预测指令作为 trigger 块，在瞬态窗口中填充 INFO\_TEXT\_START 指令。然后我们执行该测试程序，检查 rob 插桩
-监测到的 INFO\_TEXT\_START 指令条目，以此来估计瞬态窗口的大小。测试结果如表\ref{table:float-seq}、\ref{table:int-seq}所示。\par
+充当 delay 块，相邻指令之间有数据依赖，用分支预测指令作为 trigger 块，在瞬态窗口中填充 INFO\_TEXT\_START 指令。然后我们执行该测试程序，
+根据 rob 插桩监测到的 INFO\_TEXT\_START 指令条目来估计瞬态窗口的大小。测试结果如表\ref{table:float-seq}、\ref{table:int-seq}所示。\par
 
 评估表\ref{table:float-seq}可以看到，一条浮点指令触发的瞬态窗口长度为 8 条指令，两条浮点指令触发的瞬态窗口长度在 14-22 条指令之间，
-三条浮点以上指令触发的瞬态窗口长度在 17-24 条指令之间，最大不超过 24 条指令。故而只要有 3-5 条指令基本上就可以有 22-24 条指令的瞬态窗口，
-继续增加浮点指令的长度并不能显著提高。故而浮点指令数目在 3-5，即可打开 20-24 大小的瞬态窗口，继续增长指令序列没有意义。\par
+三条浮点以上指令触发的瞬态窗口长度在 17-24 条指令之间，最大不超过 24 条指令。
+故而浮点指令条数在 3-5 条，即可打开 20-24 大小的瞬态窗口，继续增长指令序列没有意义。\par
 
 \begin{table}[h!]
     \begin{center} 
@@ -925,7 +926,7 @@ access\_fault\_data 块。\par
 train 块根据是否和 trigger 对齐、是否是单条指令共有三种变体。变体一为指令对齐且单条指令，该类型随机生成某一类指令，然后将该指令和 trigger 指令对齐，
 寄存器的值由 load\_init\_train 提供，确保操作数满足指令约束。变体二为指令不对齐且单条指令，该类型随机生成某一类指令，
 但是排布位置在 trigger 指令地址的基础上随机偏移一段距离。变体三为多条指令，
-该变体使用 arbitrary 块生成训练。\par
+该变体使用 arbitrary 块生成。\par
 
 \textbf{随机块（arbitrary 块）：}\par
 为了提高测试程序的指令组合覆盖率，生成框架需要一些纯随机的指令块进行测试。其生成过程包括如下两个步骤：
@@ -949,7 +950,7 @@ train 块根据是否和 trigger 对齐、是否是单条指令共有三种变�
             \_gen\_float\_arithmetic   &  浮点运算指令及其压缩指令  &  \textasciitilde  \\
             \_gen\_int\_arithmetic     &  整数运算指令及其压缩指令  &  \textasciitilde  \\
             \_gen\_load\_store         &  内存访问指令及其压缩指令  & 访问内存地址落在指定范围内\\
-            \_system                 &  系统调用指令             &  \textasciitilde  \\
+            \_gen\_system              &  系统调用指令             &  \textasciitilde  \\
             \hline
         \end{tabular}
     }
@@ -1042,7 +1043,7 @@ c.fldsp 和 c.ldsp 指令初始化浮点寄存器和通用寄存器，sp指令�
 则将 sp 寄存器放在初始化序列的末尾进行初始化。\par
 
 \textbf{寄存器约束值初始化：}
-对寄存器值有约束需求的寄存器，生成框架需要额外计算这部分寄存器需要被初始化的值，而不是简单随机生成。
+对寄存器值有约束需求的寄存器，生成框架需要额外计算这部分寄存器的初始值，而不是简单随机生成。
 对于 load\_init\_train 块的场景可以直接根据 train 块的约束计算得到 train 指令需要的值。但是对于 load\_init 块的场景，
 要求 a0 寄存器的值和 delay 块的计算结果相加之后满足约束，所以需要事先知道 delay 块的执行结果。\par
 
@@ -1110,12 +1111,12 @@ encode 块需要尝试在瞬态窗口内尽可能多地使用携带秘密数据�
 然后尝试组合各种类型的指令，尝试将 secret 编码到各种类型的微架构部件中去。\par
 
 \textbf{控制流类型和数据流类型：}
-秘密数据既可以通过 add、load、fmul 等指令影响数据流及数据流部件，也可以通过 branch、jmp 等指令影响控制流及控制流部件。
-对于一个包含了 secret reg 的基本块，该基本块在执行的时候就会让 secret 影响微架构部件的状态，进而尝试在微架构中编码 secret，这就是数据流的情况。
+秘密数据既可以通过 add、ld、fmul 等指令影响数据流及数据流部件，也可以通过 branch、jmp 等指令影响控制流及控制流部件。
+对于一个包含了 secret reg 的基本块，该基本块在执行的时候就会让 secret 影响微架构部件的状态，进而尝试在微架构中编码 secret，这就是数据流类型。
 对于不包含 secret reg 的基本块，为了让该基本块的执行也可以受到 secret 的影响，可以将这个基本块包裹在一个涉及 secret reg 的分支语句当中，
-则该基本块会根据 secret 值的不同而选择被执行或者不执行，进而影响前端的控制流部件和流水线中的运算、存储部件，这就是控制流的情况。
-如果一个基本块包含 secret reg，则生成框架将它建模为数据流的情况；如果不包含 secret reg 则将它建模为控制流的情况。
-不过为了简化编码块的生成，生成框架会事先选择生成数据流的类型还是控制流类型。
+则该基本块会根据 secret 值的不同而选择被执行或者不执行，进而影响前端的控制流部件和流水线中的运算、存储部件，这就是控制流类型。
+如果一个基本块包含 secret reg，则生成框架将它建模为数据流类型；如果不包含 secret reg 则将它建模为控制流类型。
+不过为了简化编码块的生成，生成框架会事先选择生成数据流类型还是控制流类型。
 如果是数据流类型，则仅生成与 secret reg 相关的数据流指令，不生成与 secret reg 相关的控制流指令；
 如果是控制流类型，则在全局生成一个 secret reg 相关的 branch 分支，确保本体和变体可以走不同的分支，
 然后在一个分支中生成不带 secret reg 的指令块，另一个分支保持空
@@ -1123,10 +1124,10 @@ encode 块需要尝试在瞬态窗口内尽可能多地使用携带秘密数据�
 
 在构造基本块的时候，生成框架希望基本块产生的执行行为尽可能极端，可以让流水线的执行行为尽可能复杂。
 所以每个基本块应该尽可能集中地执行单一指令，从而让该类指令涉及到的微架构部件承受足够大的压力，
-从而在一些边界条件触发瞬态漏洞，错误地编码 secret 信息。因此生成框架根据指令类型将基本块分为了
+进而在一些边界条件触发瞬态漏洞，错误地编码 secret 信息。生成框架根据指令类型将基本块分为了
 整数操作、浮点操作、内存访问、原子操作、系统调用、函数调用返回、分支预测、跳转、CSR操作九大类。
 为了让流水线的执行行为尽可能复杂，基本块的指令之间最好有较强的竞争依赖，比如数据竞争和结构竞争。
-最后为了让 secret 信息尽可能多的影响处理器，指令应该尽量使用 secret reg 作为操作数，
+最后为了让 secret 信息尽可能多地影响处理器，指令应该尽量使用 secret reg 作为操作数，
 并将非 secret reg 作为目的寄存器，在尽可能多地使用 secret 的同时，尽可能多地传播 secret。
 delay 块一节的实验表明，瞬态窗口的大小一般在 24 条指令以内，
 因此每个基本块长度不超过 6 条指令，总的基本块个数不超过 6 个。\par
@@ -1148,11 +1149,11 @@ delay 块一节的实验表明，瞬态窗口的大小一般在 24 条指令以�
 在 spectre-V4 情况下，encode 块的指令会被执行，此时不允许生成 CSR 块，防止特权寄存器的修改破坏程序的执行。\par
 
 \textbf{内存访问块和原子操作块：}
-内存访问块和原子操作块都是涉及内存操作的，因此在执行内存操作之前需要先获得合法地址。
+内存访问块和原子操作块都涉及内存操作，因此需要获得合法的内存访问地址。
 首先产生 la 指令，确保获得的基地址在 channel 块、random\_data 块内。
 之后为了让地址可以随机一些，也为了让访问的地址可以受到 secret 的影响，生成框架按概率选择一个寄存器，
 将寄存器的值和 0x7f8 计算，然后和 la 得到的基地址相加，
-然后以该地址为基地址生成多条连续内存访问指令或者原子操作指令即可。\par
+然后以该地址为基地址生成多条内存访问指令或者原子操作指令即可。\par
 
 \textbf{分支预测块、函数调用返回块、跳转块：}
 分支预测块由一系列 branch 块组成，主要影响 BIM（bi-modal table）部件；函数调用返回块由一系列 call-return 指令组成，主要影响 RSB 部件（return stack buffer）；
@@ -1206,7 +1207,7 @@ replace 块在 decode group 中被使用，用于替换 victim group 中 trigger
 使用 boom 处理器作为瞬态漏洞挖掘的测试对象，使用 vcs 作为处理器仿真执行的综合工具。
 本实验在 16 物理核，3.4GHz主频，128G内存的 AMD 5950X 服务器上进行测评。\par
 
-测试框架有两阶段组成。阶段 1 如图\ref{paper:stage1-test}所示，首先随机产生一个测试框架代码块配置，
+测试框架由两阶段组成。阶段 1 如图\ref{paper:stage1-test}所示，首先随机产生一个测试框架代码块配置，
 然后生成 train group、trigger group 的代码，执行 starship 平台的
 boom 处理器仿真测试，如果检测到瞬态窗口触发就保存这个 trigger 样例，
 进入下一阶段，不然就产生一组新的配置，继续生成新的测试代码。
@@ -1334,7 +1335,7 @@ meltdown 异常延迟检测类型 6 类 51 个。其中通过训练触发的瞬�
 远远高于 V2 的 6 种、共计 12 个瞬态窗口。可以看到控制流类型的瞬态窗口触发指令，
 如分支预测错误、跳转目标预测错误、返回地址预测错误类型的训练是地址敏感的，
 有意识地让训练块进行地址对齐可以大大提高 trigger 指令训练的成功率。但我们也可以看到 V2 找到了
-两种 V1 没有找到的训练类型，即用 return 指令和 store 指令对 spectre-v4 进行训练，也许说明不对齐的 V2 变体
+两种 V1 没有找到的训练类型，即用 return 指令和 store 指令对 spectre-V4 进行训练，也许说明不对齐的 V2 变体
 有时可以覆盖一些极其罕见的训练情况，故而 V2 变体在瞬态漏洞挖掘时可以作为 V1 的补充。\par
 
 \textbf{V2 与 V3 的对比：}
@@ -1435,7 +1436,7 @@ call 指令的下一条指令的地址是瞬态窗口的入口，return 指令�
 所以 stage1 得到的代码可以被反复用于 stage2 的代码生成，因此我们让 stage1 得到的每个代码用于 20 次 stage2 代码的生成，
 以提高 trigger 代码的利用率，并分摊 trigger reduce 的时间开销。
 如此我们让生成框架进行 4 小时的测试，然后分析总结得到的泄露秘密数据的类别和数目。为了可以和 SpecDoctor 的随机代码生成方法进行横向对比，
-我们采用和 SpecDoctor 一样的固定触发类型、泄露通道，再进行定向测试程序生成，将我们生成框架的漏洞触发时间和 SpecDoctor 进行横向比较。\par
+我们采用和 SpecDoctor 一样对固定触发类型、泄露通道进行定向测试程序生成的测试方法，将我们生成框架的漏洞触发时间和 SpecDoctor 进行横向比较。\par
 
 \subsubsection{泄露秘密数据效率评估}
 

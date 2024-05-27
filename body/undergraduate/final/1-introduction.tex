@@ -44,7 +44,7 @@ MDS\cite{minkin2019fallout}、FPVI\cite{ragab2021rage}不断涌现；
 
 该 RISCV 处理器的瞬态执行漏洞高效测试程序生成框架，最终可以支持物理态、内核态、用户态的执行，
 支持虚拟地址和物理地址的执行，支持 rv64imafdc 的全集和 zicsr 扩展的子集\cite{riscv-isa-manual-all}。
-该生成测试框架可以在 4 小时内找到 166 个 BOOM 处理器的完整 PoC，
+该生成测试框架可以在 4 小时内找到 166 个 boom 处理器的完整 PoC，
 覆盖 15 种瞬态窗口类型和至少 2 种侧信道，对于给定的窗口类型和侧信道类型可以在分钟的时间量级内找到 PoC，
 远快于 SpecDoctor\cite{hur2022specdoctor} 等随机生成框架的小时级别。\par
 
@@ -56,7 +56,7 @@ MDS\cite{minkin2019fallout}、FPVI\cite{ragab2021rage}不断涌现；
     \item 我们设计实现了一种新的高效的 RISCV 处理器瞬态执行漏洞测试程序生成框架，
 并根据瞬态执行漏洞的语义设计了精细的代码块组织模板，可以在真实处理器中发现 RISCV 的瞬态执行漏洞
 和瞬态执行攻击 PoC，且与 SpecDoctor 等随机生成框架相比，漏洞挖掘效率得到显著提高。\par
-    \item 我们将该瞬态执行漏洞测试程序应用于开源的 BOOM 处理器，在四个小时内找到 166 个 BOOM 处理器的完整 PoC，
+    \item 我们将该瞬态执行漏洞测试程序应用于开源的 boom 处理器，在四个小时内找到 166 个 boom 处理器的完整 PoC，
 覆盖 15 种瞬态窗口类型和至少 2 种侧信道，证明了该生成框架可以找到真实处理器的 bug，具有现实意义。\par
 \end{enumerate}
 
