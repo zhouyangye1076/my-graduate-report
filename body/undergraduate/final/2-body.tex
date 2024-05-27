@@ -344,8 +344,8 @@ return 块、nop\_return 块等代码块，配合 train 块工作。\par
     \renewcommand{\algorithmicensure}{\textbf{Output:}}
     
     \begin{algorithmic}[1]
-        \REQUIRE train group list $train\_list$, vicitm group $victim$  %%input
-        \ENSURE train group list after simplificaiton $new\_train\_list$    %%output
+        \REQUIRE train group list $train\_list$, victim group $victim$  %%input
+        \ENSURE train group list after simplification $new\_train\_list$    %%output
         \STATE $new\_train\_list \Leftarrow train\_list$
         \FOR{each $i \in [1, len(train\_list)]$}
             \FOR{each $j \in [1, len(new\_train\_list)$]}
@@ -395,7 +395,7 @@ migrate\_secret 块负责改变 secret 数据在分层存储结构中的位置�
 如图\ref{paper:access-secret}，
 这两部分代码在阶段2会被组装进入 victim group。对于 access\_secret 块，
 因为访问秘密数据的过程只能在瞬态执行的过程中进行，
-因此 access\_secert 块的代码需要被布局在 trans 块的内部；
+因此 access\_secret 块的代码需要被布局在 trans 块的内部；
 而对于 migrate\_secret 块，这部分代码虽然可以在瞬态窗口外部被执行，
 但是在执行了 migrate\_secret 块的指令之后应该尽可能地避免内存访问指令的执行，
 以防破坏 secret 在内存结构中的位置，因此这部分代码被放置在 load\_init 块之后，delay 块之前。
@@ -600,8 +600,8 @@ victim group、decode group，然后执行 exit 块的代码退出。为了简�
 
 \subsection{框架组件生成}
 
-为了生成可以执行的程序，生成框架不但要生成用于触发瞬态窗口和侧信道泄露秘密数据的 poc 代码，
-还需要额外生成一些框架代码，用于支持 poc 代码的执行和生效。本章节将对这些框架相关的代码部分、数据部分、其他机制进行罗列和详细介绍。\par
+为了生成可以执行的程序，生成框架不但要生成用于触发瞬态窗口和侧信道泄露秘密数据的 PoC 代码，
+还需要额外生成一些框架代码，用于支持 PoC 代码的执行和生效。本章节将对这些框架相关的代码部分、数据部分、其他机制进行罗列和详细介绍。\par
 
 \subsubsection{框架代码块和框架数据块}
 本章节将对框架相关的代码部分、数据部分进行罗列和详细介绍。
@@ -1097,7 +1097,7 @@ secret 的迁移被作为该块的外部配置，被配置生成单元管理：
 \end{enumerate}
 
 为了防止 secret\_migrate 块的寄存器修改影响 delay 块、load\_init 块等代码块的寄存器结果，
-secert\_migrate 块在其他所有块都生成完毕后生成。然后 secret\_migrate 块选择没有被 load\_init 块初始化的寄存器作为内部使用的寄存器，
+secret\_migrate 块在其他所有块都生成完毕后生成。然后 secret\_migrate 块选择没有被 load\_init 块初始化的寄存器作为内部使用的寄存器，
 这样就可以避免 secret\_migrate 块修改的寄存器值被后续的代码块使用。另外，三种类型的 secret\_migrate 块长度是互不相同的，
 为了方便程序仅仅替换 secret\_migrate 块的迁移类型时不会影响其他代码块的地址布局，这里还需要额外补充 nop 指令，确保三种类型的 secret\_migrate 块长度相同。\par
 
@@ -1116,7 +1116,7 @@ encode 块需要尝试在瞬态窗口内尽可能多地使用携带秘密数据�
 则该基本块会根据 secret 值的不同而选择被执行或者不执行，进而影响前端的控制流部件和流水线中的运算、存储部件，这就是控制流的情况。
 如果一个基本块包含 secret reg，则生成框架将它建模为数据流的情况；如果不包含 secret reg 则将它建模为控制流的情况。
 不过为了简化编码块的生成，生成框架会事先选择生成数据流的类型还是控制流类型。
-如果是数据流类型，则仅生成与 secert reg 相关的数据流指令，不生成与 secret reg 相关的控制流指令；
+如果是数据流类型，则仅生成与 secret reg 相关的数据流指令，不生成与 secret reg 相关的控制流指令；
 如果是控制流类型，则在全局生成一个 secret reg 相关的 branch 分支，确保本体和变体可以走不同的分支，
 然后在一个分支中生成不带 secret reg 的指令块，另一个分支保持空
 （防止本体和变体编码不同的组件，导致差分测试的时间差异难以评估）。\par
@@ -1444,9 +1444,9 @@ call 指令的下一条指令的地址是瞬态窗口的入口，return 指令�
 仅对一些有代表性的 PoC 泄露机制进行简要介绍，以佐证我们实验的真实性和完整性。\par
 
 \textbf{低位匹配泄露 secret 数据：}
-access\_secert 块在使用高位地址被随机数替换的地址进行内存访问，获得 secret 值时，仍然可以成功获得 secret。实验表明
-这首先需要 secert\_migrate 块将数据载入到 cache 或者 line fill buffer，然后因为 buffer 匹配时只使用地址的一部分（高位用于权限验证），
-所以仅当低位匹配时，access\_secert 块就可以从 cache 或者 line fill buffer 获得 secret 的值。
+access\_secret 块在使用高位地址被随机数替换的地址进行内存访问，获得 secret 值时，仍然可以成功获得 secret。实验表明
+这首先需要 secret\_migrate 块将数据载入到 cache 或者 line fill buffer，然后因为 buffer 匹配时只使用地址的一部分（高位用于权限验证），
+所以仅当低位匹配时，access\_secret 块就可以从 cache 或者 line fill buffer 获得 secret 的值。
 实验表明 boom 的 buffer 使用的匹配地址最多不超过 40 位，因此只要访问地址的低 40 位匹配，就可以从 buffer 中泄露 secret。\par
 
 \textbf{通过 cache 侧信道泄露：}
